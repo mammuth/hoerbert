@@ -199,7 +199,7 @@ fn empty_snapshot() -> StateSnapshot {
 			item: None,
 			position: 0.0,
 			position_at: now_ms(),
-			volume: 0.25,
+			volume: 0.1,
 			loop_mode: LoopMode::Off,
 			segments: vec![],
 			error: None,
