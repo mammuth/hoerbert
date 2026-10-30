@@ -353,6 +353,7 @@ impl Player {
 				}
 			}
 			Cmd::Pause => self.set_paused(true),
+			Cmd::Resume if self.current.is_none() => self.start_next().await,
 			Cmd::Resume => self.set_paused(false),
 			Cmd::Toggle => {
 				let paused = matches!(self.current.as_ref().map(|c| c.status), Some(PlaybackStatus::Paused));
