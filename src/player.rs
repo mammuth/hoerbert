@@ -1,0 +1,835 @@
+//! The player actor: owns queue, playlists and the current track, runs the
+//! 20 ms audio tick (PCM → gain → Opus) and publishes state snapshots.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::{anyhow, Result};
+use audiopus::coder::Encoder;
+use audiopus::{Application, Bitrate, Channels, SampleRate};
+use rand::seq::SliceRandom;
+use tokio::sync::{mpsc, oneshot, watch};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
+
+use crate::audio::{Decoder, Pull, FRAME_LEN};
+use crate::config::Config;
+use crate::model::*;
+use crate::resolver::{Resolver, StreamInfo};
+use crate::sponsorblock;
+use crate::store::{Persisted, Store};
+use crate::ts::AudioOut;
+
+const HISTORY_MAX: usize = 50;
+const PREBUFFER_FRAMES: usize = 25; // 0.5 s before we start talking
+const STREAM_CACHE_TTL: Duration = Duration::from_secs(45 * 60);
+const MAX_RETRIES: u8 = 2;
+
+pub enum Cmd {
+	Add { tracks: Vec<Track>, requested_by: Option<String>, next: bool, play_now: bool },
+	Skip,
+	Prev,
+	Pause,
+	Resume,
+	Toggle,
+	Stop,
+	Seek(f64),
+	Volume(f32),
+	SetLoop(LoopMode),
+	SetSponsorBlock(bool),
+	Remove(Uuid),
+	Move { id: Uuid, to: usize },
+	PlayItem(Uuid),
+	Clear,
+	Shuffle,
+	PlaylistCreate { name: String, tracks: Vec<Track>, reply: oneshot::Sender<Playlist> },
+	PlaylistDelete(Uuid),
+	PlaylistRename { id: Uuid, name: String },
+	PlaylistAddTracks { id: Uuid, tracks: Vec<Track> },
+	PlaylistRemoveTrack { id: Uuid, index: usize },
+	PlaylistEnqueue { id: Uuid, shuffle: bool, requested_by: Option<String>, reply: oneshot::Sender<Result<usize>> },
+	PlaylistFromQueue { name: String, reply: oneshot::Sender<Playlist> },
+	GetPlaylist(Uuid, oneshot::Sender<Option<Playlist>>),
+	TsStatus(TsStatus),
+}
+
+#[derive(Clone)]
+pub struct PlayerHandle {
+	cmd_tx: mpsc::Sender<Cmd>,
+	state_rx: watch::Receiver<Arc<StateSnapshot>>,
+}
+
+impl PlayerHandle {
+	pub async fn send(&self, cmd: Cmd) {
+		if self.cmd_tx.send(cmd).await.is_err() {
+			error!("player actor is gone");
+		}
+	}
+	pub fn snapshot(&self) -> Arc<StateSnapshot> { self.state_rx.borrow().clone() }
+	pub fn subscribe(&self) -> watch::Receiver<Arc<StateSnapshot>> { self.state_rx.clone() }
+	pub async fn get_playlist(&self, id: Uuid) -> Option<Playlist> {
+		let (tx, rx) = oneshot::channel();
+		self.send(Cmd::GetPlaylist(id, tx)).await;
+		rx.await.ok().flatten()
+	}
+	pub async fn playlist_create(&self, name: String, tracks: Vec<Track>) -> Option<Playlist> {
+		let (tx, rx) = oneshot::channel();
+		self.send(Cmd::PlaylistCreate { name, tracks, reply: tx }).await;
+		rx.await.ok()
+	}
+	pub async fn playlist_from_queue(&self, name: String) -> Option<Playlist> {
+		let (tx, rx) = oneshot::channel();
+		self.send(Cmd::PlaylistFromQueue { name, reply: tx }).await;
+		rx.await.ok()
+	}
+	pub async fn playlist_enqueue(&self, id: Uuid, shuffle: bool, requested_by: Option<String>) -> Result<usize> {
+		let (tx, rx) = oneshot::channel();
+		self.send(Cmd::PlaylistEnqueue { id, shuffle, requested_by, reply: tx }).await;
+		rx.await.map_err(|_| anyhow!("player gone"))?
+	}
+}
+
+struct LoadResult {
+	gen: u64,
+	result: Result<(StreamInfo, Vec<Segment>)>,
+}
+
+struct Current {
+	item: QueueItem,
+	gen: u64,
+	status: PlaybackStatus,
+	decoder: Option<Decoder>,
+	stream: Option<StreamInfo>,
+	segments: Vec<Segment>,
+	/// Position where the current decoder started (after seek/resume).
+	base_pos: f64,
+	frames_played: u64,
+	prebuffered: bool,
+	starved_ticks: u32,
+	retries: u8,
+	pipe_fallback: bool,
+	talking: bool,
+}
+
+impl Current {
+	fn position(&self) -> f64 { self.base_pos + self.frames_played as f64 * 0.02 }
+	fn duration(&self) -> Option<f64> {
+		self.stream.as_ref().and_then(|s| s.duration).or(self.item.track.duration)
+	}
+}
+
+pub struct Player {
+	cfg: Config,
+	store: Store,
+	resolver: Resolver,
+	http: reqwest::Client,
+	queue: Vec<QueueItem>,
+	history: Vec<QueueItem>,
+	playlists: Vec<Playlist>,
+	current: Option<Current>,
+	volume: f32,
+	loop_mode: LoopMode,
+	sponsorblock_on: bool,
+	ts_status: TsStatus,
+	last_error: Option<String>,
+	version: u64,
+	gen_counter: u64,
+	state_tx: watch::Sender<Arc<StateSnapshot>>,
+	audio_tx: mpsc::Sender<AudioOut>,
+	encoder: Encoder,
+	opus_buf: Vec<u8>,
+	load_tx: mpsc::Sender<LoadResult>,
+	stream_cache: HashMap<String, (Instant, StreamInfo)>,
+	dirty: bool,
+	last_save: Instant,
+	last_publish: Instant,
+}
+
+pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Sender<AudioOut>) -> Result<PlayerHandle> {
+	let persisted = store.load();
+	let mut encoder = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)?;
+	encoder.set_bitrate(Bitrate::BitsPerSecond(cfg.opus_bitrate))?;
+	let ts_status = TsStatus { connected: false, server: cfg.ts_address.clone(), channel: None, listeners: 0, error: None };
+	let (cmd_tx, cmd_rx) = mpsc::channel(64);
+	let (load_tx, load_rx) = mpsc::channel(8);
+	let mut player = Player {
+		volume: persisted.volume.unwrap_or(cfg.default_volume).clamp(0.0, 1.5),
+		loop_mode: persisted.loop_mode,
+		sponsorblock_on: persisted.sponsorblock.unwrap_or(cfg.sponsorblock),
+		queue: persisted.queue,
+		history: persisted.history,
+		playlists: persisted.playlists,
+		cfg,
+		store,
+		resolver,
+		http: reqwest::Client::builder().user_agent("hoerbert/0.1").build()?,
+		current: None,
+		ts_status,
+		last_error: None,
+		version: 0,
+		gen_counter: 0,
+		state_tx: watch::channel(Arc::new(empty_snapshot())).0,
+		audio_tx,
+		encoder,
+		opus_buf: vec![0u8; 4000],
+		load_tx,
+		stream_cache: HashMap::new(),
+		dirty: false,
+		last_save: Instant::now(),
+		last_publish: Instant::now(),
+	};
+	let (state_tx, state_rx) = watch::channel(Arc::new(player.snapshot()));
+	player.state_tx = state_tx;
+	tokio::spawn(async move { player.run(cmd_rx, load_rx).await });
+	Ok(PlayerHandle { cmd_tx, state_rx })
+}
+
+fn empty_snapshot() -> StateSnapshot {
+	StateSnapshot {
+		version: 0,
+		ts: TsStatus { connected: false, server: String::new(), channel: None, listeners: 0, error: None },
+		playback: Playback {
+			status: PlaybackStatus::Idle,
+			item: None,
+			position: 0.0,
+			position_at: now_ms(),
+			volume: 0.5,
+			loop_mode: LoopMode::Off,
+			segments: vec![],
+			error: None,
+		},
+		queue: vec![],
+		history: vec![],
+		playlists: vec![],
+		sponsorblock: true,
+	}
+}
+
+impl Player {
+	async fn run(mut self, mut cmd_rx: mpsc::Receiver<Cmd>, mut load_rx: mpsc::Receiver<LoadResult>) {
+		let mut tick = tokio::time::interval(Duration::from_millis(20));
+		tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
+		// Resume where we left off: if the queue has items, start playing.
+		if self.current.is_none() && !self.queue.is_empty() {
+			self.start_next().await;
+		}
+		self.publish();
+		loop {
+			tokio::select! {
+				_ = tick.tick() => self.on_tick().await,
+				Some(cmd) = cmd_rx.recv() => {
+					self.handle(cmd).await;
+					self.publish();
+				}
+				Some(res) = load_rx.recv() => {
+					self.on_loaded(res).await;
+					self.publish();
+				}
+			}
+			if self.dirty && self.last_save.elapsed() > Duration::from_secs(1) {
+				self.save();
+			}
+		}
+	}
+
+	fn save(&mut self) {
+		let data = Persisted {
+			queue: self.queue.clone(),
+			history: self.history.clone(),
+			playlists: self.playlists.clone(),
+			volume: Some(self.volume),
+			loop_mode: self.loop_mode,
+			sponsorblock: Some(self.sponsorblock_on),
+		};
+		if let Err(e) = self.store.save(&data) {
+			error!(error = %e, "failed to persist state");
+		}
+		self.dirty = false;
+		self.last_save = Instant::now();
+	}
+
+	fn snapshot(&self) -> StateSnapshot {
+		let playback = match &self.current {
+			Some(c) => Playback {
+				status: c.status,
+				item: Some(c.item.clone()),
+				position: c.position(),
+				position_at: now_ms(),
+				volume: self.volume,
+				loop_mode: self.loop_mode,
+				segments: c.segments.clone(),
+				error: self.last_error.clone(),
+			},
+			None => Playback {
+				status: PlaybackStatus::Idle,
+				item: None,
+				position: 0.0,
+				position_at: now_ms(),
+				volume: self.volume,
+				loop_mode: self.loop_mode,
+				segments: vec![],
+				error: self.last_error.clone(),
+			},
+		};
+		StateSnapshot {
+			version: self.version,
+			ts: self.ts_status.clone(),
+			playback,
+			queue: self.queue.clone(),
+			history: self.history.clone(),
+			playlists: self
+				.playlists
+				.iter()
+				.map(|p| PlaylistSummary {
+					id: p.id,
+					name: p.name.clone(),
+					count: p.tracks.len(),
+					duration: p.tracks.iter().filter_map(|t| t.duration).sum(),
+					updated_at: p.updated_at,
+				})
+				.collect(),
+			sponsorblock: self.sponsorblock_on,
+		}
+	}
+
+	fn publish(&mut self) {
+		self.version += 1;
+		let snap = Arc::new(self.snapshot());
+		let _ = self.state_tx.send(snap);
+		self.last_publish = Instant::now();
+	}
+
+	// ---------------------------------------------------------------- commands
+
+	async fn handle(&mut self, cmd: Cmd) {
+		match cmd {
+			Cmd::Add { tracks, requested_by, next, play_now } => {
+				let items: Vec<QueueItem> = tracks.into_iter().map(|t| QueueItem::new(t, requested_by.clone())).collect();
+				if items.is_empty() {
+					return;
+				}
+				if next || play_now {
+					let mut rest = std::mem::take(&mut self.queue);
+					self.queue = items;
+					self.queue.append(&mut rest);
+				} else {
+					self.queue.extend(items);
+				}
+				self.dirty = true;
+				if play_now && self.current.is_some() {
+					self.finish_current(true).await;
+					self.start_next().await;
+				} else if self.current.is_none() {
+					self.start_next().await;
+				}
+			}
+			Cmd::Skip => {
+				if self.current.is_some() {
+					self.finish_current(true).await;
+					self.start_next().await;
+				} else {
+					self.start_next().await;
+				}
+			}
+			Cmd::Prev => {
+				if let Some(prev) = (!self.history.is_empty()).then(|| self.history.remove(0)) {
+					if let Some(c) = self.current.take() {
+						if let Some(d) = c.decoder {
+							d.kill().await;
+						}
+						self.queue.insert(0, c.item);
+					}
+					self.queue.insert(0, prev);
+					self.dirty = true;
+					self.start_next().await;
+				} else {
+					self.seek(0.0);
+				}
+			}
+			Cmd::Pause => self.set_paused(true),
+			Cmd::Resume => self.set_paused(false),
+			Cmd::Toggle => {
+				let paused = matches!(self.current.as_ref().map(|c| c.status), Some(PlaybackStatus::Paused));
+				if self.current.is_none() {
+					self.start_next().await;
+				} else {
+					self.set_paused(!paused);
+				}
+			}
+			Cmd::Stop => {
+				if let Some(c) = self.current.take() {
+					if let Some(d) = c.decoder {
+						d.kill().await;
+					}
+					self.queue.insert(0, c.item);
+					self.dirty = true;
+				}
+				let _ = self.audio_tx.try_send(AudioOut::End);
+			}
+			Cmd::Seek(pos) => self.seek(pos),
+			Cmd::Volume(v) => {
+				self.volume = v.clamp(0.0, 1.5);
+				self.dirty = true;
+			}
+			Cmd::SetLoop(m) => {
+				self.loop_mode = m;
+				self.dirty = true;
+			}
+			Cmd::SetSponsorBlock(on) => {
+				self.sponsorblock_on = on;
+				if !on {
+					if let Some(c) = &mut self.current {
+						c.segments.clear();
+					}
+				}
+				self.dirty = true;
+			}
+			Cmd::Remove(id) => {
+				self.queue.retain(|i| i.id != id);
+				self.dirty = true;
+			}
+			Cmd::Move { id, to } => {
+				if let Some(from) = self.queue.iter().position(|i| i.id == id) {
+					let item = self.queue.remove(from);
+					let to = to.min(self.queue.len());
+					self.queue.insert(to, item);
+					self.dirty = true;
+				}
+			}
+			Cmd::PlayItem(id) => {
+				if let Some(idx) = self.queue.iter().position(|i| i.id == id) {
+					let item = self.queue.remove(idx);
+					self.queue.insert(0, item);
+					self.finish_current(true).await;
+					self.start_next().await;
+				}
+			}
+			Cmd::Clear => {
+				self.queue.clear();
+				self.dirty = true;
+			}
+			Cmd::Shuffle => {
+				self.queue.shuffle(&mut rand::rng());
+				self.dirty = true;
+			}
+			Cmd::PlaylistCreate { name, tracks, reply } => {
+				let pl = Playlist { id: Uuid::new_v4(), name, tracks, created_at: now_ms(), updated_at: now_ms() };
+				self.playlists.push(pl.clone());
+				self.dirty = true;
+				let _ = reply.send(pl);
+			}
+			Cmd::PlaylistDelete(id) => {
+				self.playlists.retain(|p| p.id != id);
+				self.dirty = true;
+			}
+			Cmd::PlaylistRename { id, name } => {
+				if let Some(p) = self.playlists.iter_mut().find(|p| p.id == id) {
+					p.name = name;
+					p.updated_at = now_ms();
+					self.dirty = true;
+				}
+			}
+			Cmd::PlaylistAddTracks { id, tracks } => {
+				if let Some(p) = self.playlists.iter_mut().find(|p| p.id == id) {
+					for t in tracks {
+						if !p.tracks.iter().any(|x| x.url == t.url) {
+							p.tracks.push(t);
+						}
+					}
+					p.updated_at = now_ms();
+					self.dirty = true;
+				}
+			}
+			Cmd::PlaylistRemoveTrack { id, index } => {
+				if let Some(p) = self.playlists.iter_mut().find(|p| p.id == id) {
+					if index < p.tracks.len() {
+						p.tracks.remove(index);
+						p.updated_at = now_ms();
+						self.dirty = true;
+					}
+				}
+			}
+			Cmd::PlaylistEnqueue { id, shuffle, requested_by, reply } => {
+				let res = match self.playlists.iter().find(|p| p.id == id) {
+					Some(p) => {
+						let mut tracks = p.tracks.clone();
+						if shuffle {
+							tracks.shuffle(&mut rand::rng());
+						}
+						let n = tracks.len();
+						self.queue.extend(tracks.into_iter().map(|t| QueueItem::new(t, requested_by.clone())));
+						self.dirty = true;
+						if self.current.is_none() {
+							self.start_next().await;
+						}
+						Ok(n)
+					}
+					None => Err(anyhow!("playlist not found")),
+				};
+				let _ = reply.send(res);
+			}
+			Cmd::PlaylistFromQueue { name, reply } => {
+				let mut tracks: Vec<Track> = self.current.iter().map(|c| c.item.track.clone()).collect();
+				tracks.extend(self.queue.iter().map(|i| i.track.clone()));
+				let pl = Playlist { id: Uuid::new_v4(), name, tracks, created_at: now_ms(), updated_at: now_ms() };
+				self.playlists.push(pl.clone());
+				self.dirty = true;
+				let _ = reply.send(pl);
+			}
+			Cmd::GetPlaylist(id, reply) => {
+				let _ = reply.send(self.playlists.iter().find(|p| p.id == id).cloned());
+			}
+			Cmd::TsStatus(s) => {
+				self.ts_status = s;
+			}
+		}
+	}
+
+	fn set_paused(&mut self, paused: bool) {
+		if let Some(c) = &mut self.current {
+			if paused && c.status == PlaybackStatus::Playing {
+				c.status = PlaybackStatus::Paused;
+				if c.talking {
+					let _ = self.audio_tx.try_send(AudioOut::End);
+					c.talking = false;
+				}
+			} else if !paused && c.status == PlaybackStatus::Paused {
+				c.status = PlaybackStatus::Playing;
+			}
+		}
+	}
+
+	fn seek(&mut self, pos: f64) {
+		let cfg = self.cfg.clone();
+		let Some(c) = &mut self.current else { return };
+		let Some(stream) = c.stream.clone() else { return };
+		if stream.is_live {
+			return;
+		}
+		let pos = pos.max(0.0);
+		if let Some(d) = c.duration() {
+			if pos >= d - 0.5 {
+				// Seeking past the end == finishing the track; handled on next tick.
+				if let Some(dec) = c.decoder.take() {
+					tokio::spawn(dec.kill());
+				}
+				c.base_pos = d;
+				c.frames_played = 0;
+				c.prebuffered = true;
+				return;
+			}
+		}
+		if let Some(dec) = c.decoder.take() {
+			tokio::spawn(dec.kill());
+		}
+		c.base_pos = pos;
+		c.frames_played = 0;
+		c.prebuffered = false;
+		c.starved_ticks = 0;
+		match if c.pipe_fallback {
+			Decoder::spawn_pipe(&cfg, &c.item.track.url, pos)
+		} else {
+			Decoder::spawn_url(&cfg, &stream, pos)
+		} {
+			Ok(dec) => c.decoder = Some(dec),
+			Err(e) => {
+				error!(error = %e, "seek failed to restart decoder");
+				self.last_error = Some(format!("{e:#}"));
+			}
+		}
+	}
+
+	// ------------------------------------------------------------- lifecycle
+
+	/// Pop the next item off the queue and begin loading it.
+	async fn start_next(&mut self) {
+		if self.queue.is_empty() {
+			let _ = self.audio_tx.try_send(AudioOut::End);
+			return;
+		}
+		let item = self.queue.remove(0);
+		self.dirty = true;
+		self.gen_counter += 1;
+		let gen = self.gen_counter;
+		info!(title = %item.track.title, url = %item.track.url, "loading track");
+		self.current = Some(Current {
+			item: item.clone(),
+			gen,
+			status: PlaybackStatus::Loading,
+			decoder: None,
+			stream: None,
+			segments: vec![],
+			base_pos: 0.0,
+			frames_played: 0,
+			prebuffered: false,
+			starved_ticks: 0,
+			retries: 0,
+			pipe_fallback: false,
+			talking: false,
+		});
+		self.last_error = None;
+		self.spawn_load(gen, item.track, 0.0);
+	}
+
+	fn cached_stream(&mut self, url: &str) -> Option<StreamInfo> {
+		self.stream_cache.retain(|_, (t, _)| t.elapsed() < STREAM_CACHE_TTL);
+		self.stream_cache.get(url).map(|(_, s)| s.clone())
+	}
+
+	fn spawn_load(&mut self, gen: u64, track: Track, _start: f64) {
+		let cached = self.cached_stream(&track.url);
+		let resolver = self.resolver.clone();
+		let http = self.http.clone();
+		let tx = self.load_tx.clone();
+		let sb_on = self.sponsorblock_on;
+		let cats = self.cfg.sponsorblock_categories.clone();
+		tokio::spawn(async move {
+			let stream_fut = async {
+				match cached {
+					Some(s) => Ok(s),
+					None => resolver.stream_info(&track).await,
+				}
+			};
+			let sb_fut = async {
+				let is_yt = track.source.as_deref().map(|s| s.starts_with("youtube")).unwrap_or(false);
+				match (&track.source_id, sb_on && is_yt) {
+					(Some(id), true) => sponsorblock::fetch_segments(&http, id, &cats).await.unwrap_or_else(|e| {
+						warn!(error = %e, "sponsorblock lookup failed");
+						vec![]
+					}),
+					_ => vec![],
+				}
+			};
+			let (stream, segments) = tokio::join!(stream_fut, sb_fut);
+			let _ = tx.send(LoadResult { gen, result: stream.map(|s| (s, segments)) }).await;
+		});
+	}
+
+	/// Pre-resolve the next queued track so the gap between songs is short.
+	fn prefetch_next(&mut self) {
+		let Some(next) = self.queue.first() else { return };
+		let track = next.track.clone();
+		if self.cached_stream(&track.url).is_some() || track.source.as_deref() == Some("direct") {
+			return;
+		}
+		let resolver = self.resolver.clone();
+		let tx = self.load_tx.clone();
+		tokio::spawn(async move {
+			if let Ok(s) = resolver.stream_info(&track).await {
+				// gen 0 == prefetch result, never matches a live load
+				let _ = tx.send(LoadResult { gen: 0, result: Ok((s, vec![])) }).await;
+			}
+		});
+	}
+
+	async fn on_loaded(&mut self, res: LoadResult) {
+		if res.gen == 0 {
+			if let Ok((s, _)) = res.result {
+				// Prefetch: cache by matching the queued track URL.
+				if let Some(url) = self.queue.first().map(|i| i.track.url.clone()) {
+					if self.cached_stream(&url).is_none() {
+						self.stream_cache.insert(url, (Instant::now(), s));
+					}
+				}
+			}
+			return;
+		}
+		let cfg = self.cfg.clone();
+		let Some(c) = &mut self.current else { return };
+		if c.gen != res.gen {
+			return; // stale (user skipped while loading)
+		}
+		match res.result {
+			Ok((stream, segments)) => {
+				self.stream_cache.insert(c.item.track.url.clone(), (Instant::now(), stream.clone()));
+				if c.item.track.duration.is_none() && stream.duration.is_some() {
+					c.item.track.duration = stream.duration;
+				}
+				c.segments = segments;
+				match Decoder::spawn_url(&cfg, &stream, c.base_pos) {
+					Ok(dec) => {
+						c.decoder = Some(dec);
+						c.stream = Some(stream);
+						c.status = PlaybackStatus::Playing;
+						c.prebuffered = false;
+						info!(title = %c.item.track.title, segments = c.segments.len(), "playing");
+						self.prefetch_next();
+					}
+					Err(e) => {
+						error!(error = %e, "ffmpeg spawn failed");
+						self.last_error = Some(format!("{e:#}"));
+						self.finish_current(false).await;
+						self.start_next().await;
+					}
+				}
+			}
+			Err(e) => {
+				warn!(error = %e, title = %c.item.track.title, "could not resolve stream, skipping");
+				self.last_error = Some(format!("{}: {e:#}", c.item.track.title));
+				self.finish_current(false).await;
+				self.start_next().await;
+			}
+		}
+	}
+
+	/// Move the current item to history (and back onto the queue for loop
+	/// modes). `skipped` = explicit user action.
+	async fn finish_current(&mut self, skipped: bool) {
+		let Some(c) = self.current.take() else { return };
+		if let Some(d) = c.decoder {
+			d.kill().await;
+		}
+		if c.talking {
+			let _ = self.audio_tx.try_send(AudioOut::End);
+		}
+		match (self.loop_mode, skipped) {
+			(LoopMode::One, false) => self.queue.insert(0, QueueItem { id: Uuid::new_v4(), ..c.item.clone() }),
+			(LoopMode::All, _) => self.queue.push(QueueItem { id: Uuid::new_v4(), ..c.item.clone() }),
+			_ => {}
+		}
+		self.history.insert(0, c.item);
+		self.history.truncate(HISTORY_MAX);
+		self.dirty = true;
+	}
+
+	// ------------------------------------------------------------------ tick
+
+	async fn on_tick(&mut self) {
+		let mut finished = false;
+		let mut retry: Option<(f64, bool)> = None; // (position, use_pipe)
+		let mut skip_to: Option<f64> = None;
+		let mut publish = false;
+
+		if let Some(c) = &mut self.current {
+			if c.status == PlaybackStatus::Playing {
+				let (cur_pos, cur_dur) = (c.position(), c.duration());
+				let is_live = c.stream.as_ref().map(|s| s.is_live).unwrap_or(false);
+				if let Some(dec) = &mut c.decoder {
+					if !c.prebuffered {
+						if dec.buffered() >= PREBUFFER_FRAMES || dec.is_finished() {
+							c.prebuffered = true;
+							publish = true;
+						}
+					}
+					if c.prebuffered {
+						match dec.pull() {
+							Pull::Frame(mut pcm) => {
+								c.frames_played += 1;
+								c.starved_ticks = 0;
+								apply_gain(&mut pcm, self.volume);
+								match self.encoder.encode(&pcm[..FRAME_LEN], &mut self.opus_buf) {
+									Ok(len) => {
+										if self.audio_tx.try_send(AudioOut::Frame(self.opus_buf[..len].to_vec())).is_ok() {
+											c.talking = true;
+										}
+									}
+									Err(e) => warn!(error = %e, "opus encode failed"),
+								}
+								let pos = c.position();
+								if let Some(seg) = c.segments.iter().find(|s| pos >= s.start && pos < s.end - 0.1) {
+									debug!(category = %seg.category, from = pos, to = seg.end, "sponsorblock skip");
+									skip_to = Some(seg.end);
+								}
+							}
+							Pull::Starved => {
+								c.starved_ticks += 1;
+								if c.starved_ticks == 150 {
+									warn!(title = %c.item.track.title, "audio starved for 3 s");
+								}
+								if c.starved_ticks > 1500 {
+									// 30 s without data → restart the stream
+									warn!("stream stalled, restarting");
+									retry = Some((c.position(), c.pipe_fallback));
+								}
+							}
+							Pull::Ended => {
+								let pos = cur_pos;
+								let dur = cur_dur;
+								let err = dec.error_tail();
+								let produced = dec.produced_frames;
+								let ended_early = dur.map(|d| pos < d - 10.0).unwrap_or(false);
+								if produced == 0 && c.retries < MAX_RETRIES {
+									// Nothing decoded: likely an expired/403 URL → re-resolve or pipe.
+									warn!(error = %err, "decoder produced no audio, retrying");
+									retry = Some((c.base_pos, true));
+								} else if ended_early && c.retries < MAX_RETRIES && !is_live {
+									warn!(pos, ?dur, error = %err, "stream ended early, resuming");
+									retry = Some((pos, c.pipe_fallback));
+								} else {
+									if produced == 0 && !err.is_empty() {
+										self.last_error = Some(format!("{}: {}", c.item.track.title, err.lines().last().unwrap_or("")));
+									}
+									finished = true;
+								}
+							}
+						}
+					}
+				} else if c.stream.is_some() {
+					// decoder gone (seek past end) → finished
+					finished = true;
+				}
+			}
+		}
+
+		if let Some(pos) = skip_to {
+			self.seek(pos);
+			publish = true;
+		}
+		if let Some((pos, use_pipe)) = retry {
+			self.retry_current(pos, use_pipe).await;
+			publish = true;
+		}
+		if finished {
+			let title = self.current.as_ref().map(|c| c.item.track.title.clone()).unwrap_or_default();
+			info!(title = %title, "track finished");
+			self.finish_current(false).await;
+			self.start_next().await;
+			publish = true;
+		}
+		if publish || (self.current.is_some() && self.last_publish.elapsed() > Duration::from_secs(3)) {
+			self.publish();
+		}
+	}
+
+	async fn retry_current(&mut self, pos: f64, use_pipe: bool) {
+		let cfg = self.cfg.clone();
+		let Some(c) = &mut self.current else { return };
+		c.retries += 1;
+		if let Some(d) = c.decoder.take() {
+			d.kill().await;
+		}
+		c.base_pos = pos;
+		c.frames_played = 0;
+		c.prebuffered = false;
+		c.starved_ticks = 0;
+		self.stream_cache.remove(&c.item.track.url);
+		let direct = c.stream.as_ref().map(|s| s.direct).unwrap_or(false);
+		if use_pipe && !direct {
+			c.pipe_fallback = true;
+			match Decoder::spawn_pipe(&cfg, &c.item.track.url, pos) {
+				Ok(d) => c.decoder = Some(d),
+				Err(e) => {
+					self.last_error = Some(format!("{e:#}"));
+					self.finish_current(false).await;
+					self.start_next().await;
+				}
+			}
+		} else {
+			// Re-resolve the stream URL and restart ffmpeg from `pos`.
+			c.status = PlaybackStatus::Loading;
+			let gen = c.gen;
+			let track = c.item.track.clone();
+			self.spawn_load(gen, track, pos);
+		}
+	}
+}
+
+fn apply_gain(pcm: &mut [i16], gain: f32) {
+	if (gain - 1.0).abs() < 0.001 {
+		return;
+	}
+	for s in pcm.iter_mut() {
+		*s = (*s as f32 * gain).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+	}
+}

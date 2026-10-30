@@ -1,0 +1,22 @@
+services:
+  hoerbert:
+    build: .
+    image: hoerbert:latest
+    container_name: hoerbert
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+
+  # Optional: PO-token provider for YouTube. Only needed if yt-dlp keeps
+  # failing with "Sign in to confirm you're not a bot" (mostly datacenter IPs).
+  # Enable with:  docker compose --profile pot up -d
+  # and set YTDLP_ARGS=--extractor-args "youtubepot-bgutilhttp:base_url=http://bgutil:4416"
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: hoerbert-bgutil
+    restart: unless-stopped
+    init: true
+    profiles: ["pot"]
