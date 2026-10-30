@@ -34,7 +34,7 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `TS_CHANNEL_PASSWORD`, `TS_SERVER_PASSWORD` | — | passwords, if any |
 | `WEB_BIND` | `0.0.0.0:8080` | where the web UI listens |
 | `PUBLIC_URL` | — | URL shown by `!link` / `!help` |
-| `DEFAULT_VOLUME` | `0.25` | 0.0 – 1.5 |
+| `DEFAULT_VOLUME` | `0.1` | 0.0 – 1.5 |
 | `OPUS_BITRATE` | `128000` | Opus encoder bitrate |
 | `SPONSORBLOCK` | `true` | skip SponsorBlock segments on YouTube |
 | `SPONSORBLOCK_CATEGORIES` | `sponsor,selfpromo,interaction,music_offtopic` | which categories to skip |

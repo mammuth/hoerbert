@@ -57,7 +57,7 @@ impl Config {
 			sponsorblock: env("SPONSORBLOCK").map(|v| v != "false" && v != "0").unwrap_or(true),
 			sponsorblock_categories,
 			opus_bitrate: env("OPUS_BITRATE").and_then(|v| v.parse().ok()).unwrap_or(128_000),
-			default_volume: env("DEFAULT_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(0.25),
+			default_volume: env("DEFAULT_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(0.1),
 			command_prefix: env("COMMAND_PREFIX").unwrap_or_else(|| "!".into()),
 		})
 	}
