@@ -14,6 +14,7 @@ export interface QueueItem {
   track: Track
   requested_by?: string
   added_at: number
+  request?: boolean
 }
 
 export interface Segment { start: number; end: number; category: string }

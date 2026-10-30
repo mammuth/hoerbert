@@ -36,11 +36,14 @@ pub struct QueueItem {
 	pub requested_by: Option<String>,
 	/// Unix millis when the item was added.
 	pub added_at: u64,
+	/// Individually requested song: plays before playlist/mix tracks.
+	#[serde(default)]
+	pub request: bool,
 }
 
 impl QueueItem {
 	pub fn new(track: Track, requested_by: Option<String>) -> Self {
-		Self { id: Uuid::new_v4(), track, requested_by, added_at: now_ms() }
+		Self { id: Uuid::new_v4(), track, requested_by, added_at: now_ms(), request: false }
 	}
 }
 

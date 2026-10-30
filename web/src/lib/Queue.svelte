@@ -53,6 +53,9 @@
   {:else}
     <ol>
       {#each queue as item, i (item.id)}
+        {#if i > 0 && !item.request && queue[i - 1].request}
+          <li class="divider mono faint" aria-hidden="true">then from playlists &amp; mixes</li>
+        {/if}
         <li
           class="rise"
           class:over={overIndex === i}
@@ -99,6 +102,8 @@
   li:hover { background: var(--surface-2); }
   li.over { border-color: var(--accent); background: rgba(255, 122, 26, 0.06); }
   li.dragging { opacity: 0.4; }
+  li.divider { display: block; margin: 6px 0 2px; padding: 8px 8px 2px 38px; border-top: 1px dashed var(--border-strong); border-radius: 0; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+  li.divider:hover { background: none; }
   .n { text-align: right; font-size: 12px; }
   .thumb { position: relative; width: 56px; height: 36px; padding: 0; border: none; border-radius: 6px; overflow: hidden; background: var(--surface-2); color: var(--muted); justify-content: center; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }

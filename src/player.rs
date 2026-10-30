@@ -310,7 +310,11 @@ impl Player {
 	async fn handle(&mut self, cmd: Cmd) {
 		match cmd {
 			Cmd::Add { tracks, requested_by, next, play_now } => {
-				let items: Vec<QueueItem> = tracks.into_iter().map(|t| QueueItem::new(t, requested_by.clone())).collect();
+				// A single track is a request; playlists/mixes are background
+				// music that only plays once all requests are done.
+				let request = tracks.len() == 1;
+				let items: Vec<QueueItem> =
+					tracks.into_iter().map(|t| QueueItem { request, ..QueueItem::new(t, requested_by.clone()) }).collect();
 				if items.is_empty() {
 					return;
 				}
@@ -318,6 +322,9 @@ impl Player {
 					let mut rest = std::mem::take(&mut self.queue);
 					self.queue = items;
 					self.queue.append(&mut rest);
+				} else if request {
+					let at = self.queue.iter().position(|i| !i.request).unwrap_or(self.queue.len());
+					self.queue.splice(at..at, items);
 				} else {
 					self.queue.extend(items);
 				}
@@ -407,7 +414,9 @@ impl Player {
 				self.dirty = true;
 			}
 			Cmd::Shuffle => {
-				self.queue.shuffle(&mut rand::rng());
+				// Requests keep their order; only the background part is shuffled.
+				let at = self.queue.iter().position(|i| !i.request).unwrap_or(self.queue.len());
+				self.queue[at..].shuffle(&mut rand::rng());
 				self.dirty = true;
 			}
 			Cmd::PlaylistCreate { name, tracks, reply } => {
