@@ -18,7 +18,7 @@
   let volumeLocal = $state<number | null>(null)
   let volTimer: ReturnType<typeof setTimeout> | undefined
 
-  const volume = $derived(volumeLocal ?? pb?.volume ?? 0.5)
+  const volume = $derived(volumeLocal ?? pb?.volume ?? 0.25)
 
   function onVolume(e: Event) {
     const v = Number((e.target as HTMLInputElement).value) / 100
