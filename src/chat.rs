@@ -67,7 +67,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 	let snap = ctx.player.snapshot();
 	match cmd.as_str() {
 		"help" | "h" | "?" => Some(help(prefix, ctx.cfg.public_url.as_deref())),
-		"play" | "p" | "add" | "next" | "playnow" => {
+		"play" | "p" | "add" | "search" | "yt" | "next" | "playnow" => {
 			if arg.is_empty() {
 				if snap.playback.status == PlaybackStatus::Paused {
 					ctx.player.send(Cmd::Resume).await;
@@ -196,16 +196,33 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 		}
 		"pl" | "playlist" => {
 			if arg.is_empty() {
-				return Some(format!("usage: {prefix}pl <playlist name>"));
+				return Some(format!("usage: {prefix}pl <saved playlist or search terms>"));
 			}
 			let needle = arg.to_lowercase();
-			let pl = snap
+			let saved = snap
 				.playlists
 				.iter()
 				.find(|p| p.name.to_lowercase() == needle)
-				.or_else(|| snap.playlists.iter().find(|p| p.name.to_lowercase().contains(&needle)))?;
-			match ctx.player.playlist_enqueue(pl.id, false, who).await {
-				Ok(n) => Some(format!("➕ queued {n} tracks from \"{}\"", pl.name)),
+				.or_else(|| snap.playlists.iter().find(|p| p.name.to_lowercase().contains(&needle)));
+			if let Some(pl) = saved {
+				return match ctx.player.playlist_enqueue(pl.id, false, who).await {
+					Ok(n) => Some(format!("➕ queued {n} tracks from \"{}\"", pl.name)),
+					Err(e) => Some(format!("✖ {e}")),
+				};
+			}
+			// No saved playlist: queue the top YouTube playlist for the query.
+			let url = match ctx.resolver.search_playlist(arg).await {
+				Ok(Some(u)) => u,
+				Ok(None) => return Some("nothing found".into()),
+				Err(e) => return Some(format!("✖ {e}")),
+			};
+			match ctx.resolver.resolve_input(&url).await {
+				Ok((name, tracks)) if !tracks.is_empty() => {
+					let n = tracks.len();
+					ctx.player.send(Cmd::Add { tracks, requested_by: who, next: false, play_now: false }).await;
+					Some(format!("➕ queued {n} tracks from \"{}\"", name.unwrap_or(url)))
+				}
+				Ok(_) => Some("nothing found".into()),
 				Err(e) => Some(format!("✖ {e}")),
 			}
 		}
@@ -267,11 +284,11 @@ fn parse_time(s: &str) -> Option<f64> {
 fn help(prefix: &str, url: Option<&str>) -> String {
 	let mut s = format!(
 		"Hörbert commands:\n\
-		 {p}play <url|search> – queue a track/playlist (also {p}next, {p}playnow)\n\
+		 {p}play <url|search> – queue a track/playlist (also {p}search, {p}next, {p}playnow)\n\
 		 {p}skip · {p}prev · {p}pause · {p}resume · {p}stop\n\
 		 {p}np · {p}queue · {p}remove <n> · {p}shuffle · {p}clear\n\
 		 {p}vol <0-100> · {p}seek <mm:ss> · {p}loop off|one|all · {p}sb on|off\n\
-		 {p}playlists · {p}pl <name>",
+		 {p}playlists · {p}pl <saved name|search>",
 		p = prefix
 	);
 	if let Some(u) = url {

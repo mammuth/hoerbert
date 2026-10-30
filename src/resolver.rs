@@ -82,6 +82,21 @@ pub fn is_url(input: &str) -> bool {
 	(s.starts_with("http://") || s.starts_with("https://")) && !s.contains(char::is_whitespace)
 }
 
+/// Search hits considered when picking a single track for free-text input.
+const SEARCH_CANDIDATES: usize = 8;
+
+/// Keep YouTube's relevance order but skip livestreams, Shorts and
+/// hour-long loops/compilations when a normal-length hit exists.
+fn pick_best(tracks: Vec<Track>) -> Option<Track> {
+	let song_like = |t: &&Track| !t.is_live && t.duration.is_some_and(|d| (60.0..=1200.0).contains(&d));
+	tracks
+		.iter()
+		.find(song_like)
+		.or_else(|| tracks.iter().find(|t| !t.is_live))
+		.or_else(|| tracks.first())
+		.cloned()
+}
+
 fn looks_like_direct_media(url: &str) -> bool {
 	let path = url.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase();
 	[".mp3", ".ogg", ".oga", ".opus", ".flac", ".m4a", ".aac", ".wav", ".webm", ".mp4", ".m3u8", ".pls"]
@@ -210,11 +225,11 @@ impl Resolver {
 				Err(e) => Err(e),
 			}
 		} else {
-			let tracks = self.search(input, 1).await?;
-			if tracks.is_empty() {
-				bail!("no results for \"{input}\"");
+			let tracks = self.search(input, SEARCH_CANDIDATES).await?;
+			match pick_best(tracks) {
+				Some(t) => Ok((None, vec![t])),
+				None => bail!("no results for \"{input}\""),
 			}
-			Ok((None, tracks))
 		}
 	}
 
@@ -223,6 +238,21 @@ impl Resolver {
 		cmd.arg("-J").arg("--flat-playlist").arg(format!("ytsearch{}:{}", limit.clamp(1, 25), query.trim()));
 		let v = self.run_json(cmd).await?;
 		Ok(Self::tracks_from_json(v)?.1)
+	}
+
+	/// URL of the top YouTube playlist for a search query.
+	pub async fn search_playlist(&self, query: &str) -> Result<Option<String>> {
+		let mut url = url::Url::parse_with_params("https://www.youtube.com/results", &[("search_query", query.trim())])?.to_string();
+		url.push_str("&sp=EgIQAw%253D%253D"); // YouTube's "type: playlist" filter
+		let mut cmd = self.base_cmd();
+		cmd.arg("-J").arg("--flat-playlist").arg("--playlist-items").arg("1").arg(url);
+		let v = self.run_json(cmd).await?;
+		Ok(v.get("entries")
+			.and_then(Value::as_array)
+			.and_then(|e| e.first())
+			.and_then(|e| e.get("url"))
+			.and_then(Value::as_str)
+			.map(str::to_string))
 	}
 
 	/// Resolve the actual audio stream for a track.
