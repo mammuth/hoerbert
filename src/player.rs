@@ -22,6 +22,8 @@ use crate::store::{Persisted, Store};
 use crate::ts::AudioOut;
 
 const HISTORY_MAX: usize = 50;
+/// Stop instead of skipping after this many unresolvable tracks in a row.
+const MAX_RESOLVE_FAILURES: u32 = 3;
 const PREBUFFER_FRAMES: usize = 25; // 0.5 s before we start talking
 const STREAM_CACHE_TTL: Duration = Duration::from_secs(45 * 60);
 const MAX_RETRIES: u8 = 2;
@@ -133,6 +135,8 @@ pub struct Player {
 	sponsorblock_on: bool,
 	ts_status: TsStatus,
 	last_error: Option<String>,
+	/// Consecutive tracks whose stream could not be resolved.
+	resolve_failures: u32,
 	version: u64,
 	gen_counter: u64,
 	state_tx: watch::Sender<Arc<StateSnapshot>>,
@@ -167,6 +171,7 @@ pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Send
 		current: None,
 		ts_status,
 		last_error: None,
+		resolve_failures: 0,
 		version: 0,
 		gen_counter: 0,
 		state_tx: watch::channel(Arc::new(empty_snapshot())).0,
@@ -194,7 +199,7 @@ fn empty_snapshot() -> StateSnapshot {
 			item: None,
 			position: 0.0,
 			position_at: now_ms(),
-			volume: 0.5,
+			volume: 0.25,
 			loop_mode: LoopMode::Off,
 			segments: vec![],
 			error: None,
@@ -357,16 +362,7 @@ impl Player {
 					self.set_paused(!paused);
 				}
 			}
-			Cmd::Stop => {
-				if let Some(c) = self.current.take() {
-					if let Some(d) = c.decoder {
-						d.kill().await;
-					}
-					self.queue.insert(0, c.item);
-					self.dirty = true;
-				}
-				let _ = self.audio_tx.try_send(AudioOut::End);
-			}
+			Cmd::Stop => self.stop().await,
 			Cmd::Seek(pos) => self.seek(pos),
 			Cmd::Volume(v) => {
 				self.volume = v.clamp(0.0, 1.5);
@@ -654,6 +650,7 @@ impl Player {
 						c.status = PlaybackStatus::Playing;
 						c.prebuffered = false;
 						info!(title = %c.item.track.title, segments = c.segments.len(), "playing");
+						self.resolve_failures = 0;
 						self.prefetch_next();
 					}
 					Err(e) => {
@@ -665,12 +662,34 @@ impl Player {
 				}
 			}
 			Err(e) => {
-				warn!(error = %e, title = %c.item.track.title, "could not resolve stream, skipping");
 				self.last_error = Some(format!("{}: {e:#}", c.item.track.title));
-				self.finish_current(false).await;
-				self.start_next().await;
+				self.resolve_failures += 1;
+				// A bot check / login wall hits every track: skipping would just
+				// drain the queue. Stop and keep the track instead.
+				let msg = format!("{e:#}");
+				if (msg.contains("Sign in to confirm you") && msg.contains("bot")) || self.resolve_failures >= MAX_RESOLVE_FAILURES {
+					error!(error = %e, failures = self.resolve_failures, "resolving keeps failing, stopping playback");
+					self.resolve_failures = 0;
+					self.stop().await;
+				} else {
+					warn!(error = %e, title = %c.item.track.title, "could not resolve stream, skipping");
+					self.finish_current(false).await;
+					self.start_next().await;
+				}
 			}
 		}
+	}
+
+	/// Stop playback and put the current item back at the front of the queue.
+	async fn stop(&mut self) {
+		if let Some(c) = self.current.take() {
+			if let Some(d) = c.decoder {
+				d.kill().await;
+			}
+			self.queue.insert(0, c.item);
+			self.dirty = true;
+		}
+		let _ = self.audio_tx.try_send(AudioOut::End);
 	}
 
 	/// Move the current item to history (and back onto the queue for loop

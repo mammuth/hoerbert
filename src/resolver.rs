@@ -201,10 +201,13 @@ impl Resolver {
 			cmd.arg("-J").arg("--flat-playlist").arg(input);
 			match self.run_json(cmd).await {
 				Ok(v) => Self::tracks_from_json(v),
-				Err(e) => {
+				// Only unknown sites may be raw media; real extractor errors
+				// (bot check, private, geo-block) must reach the user.
+				Err(e) if e.to_string().contains("Unsupported URL") => {
 					warn!(error = %e, url = input, "yt-dlp failed, falling back to direct URL");
 					Ok((None, vec![direct_track(input)]))
 				}
+				Err(e) => Err(e),
 			}
 		} else {
 			let tracks = self.search(input, 1).await?;
