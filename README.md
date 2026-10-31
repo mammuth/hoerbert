@@ -113,3 +113,7 @@ Push to `main` → `.github/workflows/build.yml` publishes `ghcr.io/mammuth/hoer
 ## License
 
 MIT
+
+---
+
+> **Disclaimer:** this project is fully vibe coded. Use at your own risk.
