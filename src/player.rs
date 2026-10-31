@@ -1,15 +1,15 @@
-//! The player actor: owns queue, playlists and the current track, runs the
+//! The player actor: owns queue, history and the current track, runs the
 //! 20 ms audio tick (PCM → gain → Opus) and publishes state snapshots.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use audiopus::coder::Encoder;
 use audiopus::{Application, Bitrate, Channels, SampleRate};
 use rand::seq::SliceRandom;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -47,14 +47,6 @@ pub enum Cmd {
 	PlayItem(Uuid),
 	Clear,
 	Shuffle,
-	PlaylistCreate { name: String, tracks: Vec<Track>, reply: oneshot::Sender<Playlist> },
-	PlaylistDelete(Uuid),
-	PlaylistRename { id: Uuid, name: String },
-	PlaylistAddTracks { id: Uuid, tracks: Vec<Track> },
-	PlaylistRemoveTrack { id: Uuid, index: usize },
-	PlaylistEnqueue { id: Uuid, shuffle: bool, requested_by: Option<String>, reply: oneshot::Sender<Result<usize>> },
-	PlaylistFromQueue { name: String, reply: oneshot::Sender<Playlist> },
-	GetPlaylist(Uuid, oneshot::Sender<Option<Playlist>>),
 	TsStatus(TsStatus),
 }
 
@@ -72,26 +64,6 @@ impl PlayerHandle {
 	}
 	pub fn snapshot(&self) -> Arc<StateSnapshot> { self.state_rx.borrow().clone() }
 	pub fn subscribe(&self) -> watch::Receiver<Arc<StateSnapshot>> { self.state_rx.clone() }
-	pub async fn get_playlist(&self, id: Uuid) -> Option<Playlist> {
-		let (tx, rx) = oneshot::channel();
-		self.send(Cmd::GetPlaylist(id, tx)).await;
-		rx.await.ok().flatten()
-	}
-	pub async fn playlist_create(&self, name: String, tracks: Vec<Track>) -> Option<Playlist> {
-		let (tx, rx) = oneshot::channel();
-		self.send(Cmd::PlaylistCreate { name, tracks, reply: tx }).await;
-		rx.await.ok()
-	}
-	pub async fn playlist_from_queue(&self, name: String) -> Option<Playlist> {
-		let (tx, rx) = oneshot::channel();
-		self.send(Cmd::PlaylistFromQueue { name, reply: tx }).await;
-		rx.await.ok()
-	}
-	pub async fn playlist_enqueue(&self, id: Uuid, shuffle: bool, requested_by: Option<String>) -> Result<usize> {
-		let (tx, rx) = oneshot::channel();
-		self.send(Cmd::PlaylistEnqueue { id, shuffle, requested_by, reply: tx }).await;
-		rx.await.map_err(|_| anyhow!("player gone"))?
-	}
 }
 
 struct LoadResult {
@@ -146,7 +118,6 @@ pub struct Player {
 	http: reqwest::Client,
 	queue: Vec<QueueItem>,
 	history: Vec<QueueItem>,
-	playlists: Vec<Playlist>,
 	current: Option<Current>,
 	volume: f32,
 	loop_mode: LoopMode,
@@ -186,7 +157,6 @@ pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Send
 		sponsorblock_on: persisted.sponsorblock.unwrap_or(cfg.sponsorblock),
 		queue: persisted.queue,
 		history: persisted.history,
-		playlists: persisted.playlists,
 		cfg,
 		store,
 		resolver,
@@ -230,7 +200,6 @@ fn empty_snapshot() -> StateSnapshot {
 		},
 		queue: vec![],
 		history: vec![],
-		playlists: vec![],
 		sponsorblock: true,
 	}
 }
@@ -270,7 +239,6 @@ impl Player {
 		let data = Persisted {
 			queue: self.queue.clone(),
 			history: self.history.clone(),
-			playlists: self.playlists.clone(),
 			volume: Some(self.volume),
 			loop_mode: self.loop_mode,
 			sponsorblock: Some(self.sponsorblock_on),
@@ -311,17 +279,6 @@ impl Player {
 			playback,
 			queue: self.queue.clone(),
 			history: self.history.clone(),
-			playlists: self
-				.playlists
-				.iter()
-				.map(|p| PlaylistSummary {
-					id: p.id,
-					name: p.name.clone(),
-					count: p.tracks.len(),
-					duration: p.tracks.iter().filter_map(|t| t.duration).sum(),
-					updated_at: p.updated_at,
-				})
-				.collect(),
 			sponsorblock: self.sponsorblock_on,
 		}
 	}
@@ -446,73 +403,6 @@ impl Player {
 				let at = self.queue.iter().position(|i| !i.request).unwrap_or(self.queue.len());
 				self.queue[at..].shuffle(&mut rand::rng());
 				self.dirty = true;
-			}
-			Cmd::PlaylistCreate { name, tracks, reply } => {
-				let pl = Playlist { id: Uuid::new_v4(), name, tracks, created_at: now_ms(), updated_at: now_ms() };
-				self.playlists.push(pl.clone());
-				self.dirty = true;
-				let _ = reply.send(pl);
-			}
-			Cmd::PlaylistDelete(id) => {
-				self.playlists.retain(|p| p.id != id);
-				self.dirty = true;
-			}
-			Cmd::PlaylistRename { id, name } => {
-				if let Some(p) = self.playlists.iter_mut().find(|p| p.id == id) {
-					p.name = name;
-					p.updated_at = now_ms();
-					self.dirty = true;
-				}
-			}
-			Cmd::PlaylistAddTracks { id, tracks } => {
-				if let Some(p) = self.playlists.iter_mut().find(|p| p.id == id) {
-					for t in tracks {
-						if !p.tracks.iter().any(|x| x.url == t.url) {
-							p.tracks.push(t);
-						}
-					}
-					p.updated_at = now_ms();
-					self.dirty = true;
-				}
-			}
-			Cmd::PlaylistRemoveTrack { id, index } => {
-				if let Some(p) = self.playlists.iter_mut().find(|p| p.id == id) {
-					if index < p.tracks.len() {
-						p.tracks.remove(index);
-						p.updated_at = now_ms();
-						self.dirty = true;
-					}
-				}
-			}
-			Cmd::PlaylistEnqueue { id, shuffle, requested_by, reply } => {
-				let res = match self.playlists.iter().find(|p| p.id == id) {
-					Some(p) => {
-						let mut tracks = p.tracks.clone();
-						if shuffle {
-							tracks.shuffle(&mut rand::rng());
-						}
-						let n = tracks.len();
-						self.queue.extend(tracks.into_iter().map(|t| QueueItem::new(t, requested_by.clone())));
-						self.dirty = true;
-						if self.current.is_none() {
-							self.start_next().await;
-						}
-						Ok(n)
-					}
-					None => Err(anyhow!("playlist not found")),
-				};
-				let _ = reply.send(res);
-			}
-			Cmd::PlaylistFromQueue { name, reply } => {
-				let mut tracks: Vec<Track> = self.current.iter().map(|c| c.item.track.clone()).collect();
-				tracks.extend(self.queue.iter().map(|i| i.track.clone()));
-				let pl = Playlist { id: Uuid::new_v4(), name, tracks, created_at: now_ms(), updated_at: now_ms() };
-				self.playlists.push(pl.clone());
-				self.dirty = true;
-				let _ = reply.send(pl);
-			}
-			Cmd::GetPlaylist(id, reply) => {
-				let _ = reply.send(self.playlists.iter().find(|p| p.id == id).cloned());
 			}
 			Cmd::TsStatus(s) => {
 				self.ts_status = s;

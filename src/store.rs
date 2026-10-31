@@ -1,4 +1,4 @@
-//! Persistence: one JSON file for queue/playlists/settings, one for the
+//! Persistence: one JSON file for queue/history/settings, one for the
 //! TeamSpeak identity. Small and personal — no database needed.
 
 use std::path::{Path, PathBuf};
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{LoopMode, Playlist, QueueItem};
+use crate::model::{LoopMode, QueueItem};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Persisted {
@@ -14,8 +14,6 @@ pub struct Persisted {
 	pub queue: Vec<QueueItem>,
 	#[serde(default)]
 	pub history: Vec<QueueItem>,
-	#[serde(default)]
-	pub playlists: Vec<Playlist>,
 	#[serde(default)]
 	pub volume: Option<f32>,
 	#[serde(default)]

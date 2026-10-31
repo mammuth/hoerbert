@@ -63,6 +63,16 @@ class Store {
       return undefined
     }
   }
+
+  /** run() for web adds: a name is required, otherwise point the user at the name field. */
+  async runAs<T>(fn: (who: string) => Promise<T>, okText?: string): Promise<T | undefined> {
+    if (!this.nick) {
+      this.toast('Enter your name first', 'error')
+      document.getElementById('nick')?.focus()
+      return undefined
+    }
+    return this.run(fn(this.nick), okText)
+  }
 }
 
 export const store = new Store()

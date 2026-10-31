@@ -2,7 +2,7 @@
 
 A TeamSpeak music bot for your own server: it joins a channel as a normal
 voice client and plays audio for everyone in it. Control it from a shared web
-UI (queue, search, playlists, volume, seek) or with chat commands in TeamSpeak.
+UI (queue, search, history, volume, seek) or with chat commands in TeamSpeak.
 
 - **Sources:** anything [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports — YouTube (videos, playlists, search), SoundCloud, Bandcamp, … plus direct audio/radio URLs.
 - **No accounts, no ads:** yt-dlp fetches the raw audio stream; YouTube's in-video sponsor segments are skipped with [SponsorBlock](https://sponsor.ajay.app/).
@@ -50,11 +50,10 @@ auth if the port is reachable from the internet.
 ### Chat commands
 
 ```
-!play <url | search terms>   queue a track or whole playlist (!next, !playnow)
-!skip  !prev  !pause  !resume  !stop
-!np  !queue  !remove <n>  !shuffle  !clear
-!vol <0-100>  !seek <mm:ss>  !loop off|one|all  !sb on|off
-!playlists  !pl <name>  !link  !help
+!play <link or search>   add to queue (playlist links queue the whole list)
+!next <link or search>   play right after the current track
+!skip  !prev  !pause
+!now  !queue  !clear
 ```
 
 ## When YouTube says “Sign in to confirm you’re not a bot”

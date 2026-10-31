@@ -3,9 +3,6 @@
   import { fmtTime } from './format'
   import Icon from './Icon.svelte'
   import { store } from './store.svelte'
-  import type { Track } from './types'
-
-  let { onAddToPlaylist }: { onAddToPlaylist?: (t: Track) => void } = $props()
   const history = $derived(store.snap?.history ?? [])
 </script>
 
@@ -21,8 +18,7 @@
           <div class="s muted ellipsis">{item.track.artist ?? ''} · {fmtTime(item.track.duration)}{item.requested_by ? ` · ${item.requested_by}` : ''}</div>
         </div>
         <div class="acts">
-          <button class="icon ghost" title="queue again" onclick={() => store.run(api.add({ track: item.track, requested_by: store.nick || undefined }), 'Queued again')}><Icon name="plus" size={16} /></button>
-          {#if onAddToPlaylist}<button class="icon ghost" title="add to playlist" onclick={() => onAddToPlaylist?.(item.track)}><Icon name="heart" size={16} /></button>{/if}
+          <button class="icon ghost" title="queue again" onclick={() => store.runAs((who) => api.add({ track: item.track, requested_by: who }), 'Queued again')}><Icon name="plus" size={16} /></button>
         </div>
       </li>
     {/each}

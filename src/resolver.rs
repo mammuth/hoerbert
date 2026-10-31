@@ -256,21 +256,6 @@ impl Resolver {
 		Ok(Self::tracks_from_json(v)?.1)
 	}
 
-	/// URL of the top YouTube playlist for a search query.
-	pub async fn search_playlist(&self, query: &str) -> Result<Option<String>> {
-		let mut url = url::Url::parse_with_params("https://www.youtube.com/results", &[("search_query", query.trim())])?.to_string();
-		url.push_str("&sp=EgIQAw%253D%253D"); // YouTube's "type: playlist" filter
-		let mut cmd = self.base_cmd();
-		cmd.arg("-J").arg("--flat-playlist").arg("--playlist-items").arg("1").arg(url);
-		let v = self.run_json(cmd).await?;
-		Ok(v.get("entries")
-			.and_then(Value::as_array)
-			.and_then(|e| e.first())
-			.and_then(|e| e.get("url"))
-			.and_then(Value::as_str)
-			.map(str::to_string))
-	}
-
 	/// Resolve the actual audio stream for a track.
 	pub async fn stream_info(&self, track: &Track) -> Result<StreamInfo> {
 		if track.source.as_deref() == Some("direct") || looks_like_direct_media(&track.url) {

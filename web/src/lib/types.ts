@@ -41,28 +41,11 @@ export interface TsStatus {
   error?: string
 }
 
-export interface PlaylistSummary {
-  id: string
-  name: string
-  count: number
-  duration: number
-  updated_at: number
-}
-
-export interface Playlist {
-  id: string
-  name: string
-  tracks: Track[]
-  created_at: number
-  updated_at: number
-}
-
 export interface Snapshot {
   version: number
   ts: TsStatus
   playback: Playback
   queue: QueueItem[]
   history: QueueItem[]
-  playlists: PlaylistSummary[]
   sponsorblock: boolean
 }

@@ -4,39 +4,12 @@
   import History from './lib/History.svelte'
   import Icon from './lib/Icon.svelte'
   import NowPlaying from './lib/NowPlaying.svelte'
-  import Playlists from './lib/Playlists.svelte'
   import Queue from './lib/Queue.svelte'
-  import { api } from './lib/api'
   import { store } from './lib/store.svelte'
-  import type { Track } from './lib/types'
-
-  let tab = $state<'playlists' | 'history'>('playlists')
-  let pendingTrack = $state<Track | null>(null)
-  let editingNick = $state(false)
-  let nickDraft = $state('')
 
   onMount(() => {
     store.connect()
-    if (!store.nick) { editingNick = true }
   })
-
-  function addToPlaylist(t: Track) {
-    pendingTrack = t
-    tab = 'playlists'
-    document.getElementById('side')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  async function saveQueue() {
-    const name = prompt('Name for the new playlist')
-    if (!name) return
-    await store.run(api.playlistFromQueue(name), `Saved “${name}”`)
-    tab = 'playlists'
-  }
-
-  function saveNick() {
-    store.setNick(nickDraft)
-    editingNick = false
-  }
 
   const ts = $derived(store.snap?.ts)
 </script>
@@ -61,42 +34,23 @@
       {:else}
         <span class="pill off" title={ts?.error ?? ''}><span class="dot"></span> TeamSpeak offline</span>
       {/if}
-      {#if editingNick}
-        <form class="nick" onsubmit={(e) => { e.preventDefault(); saveNick() }}>
-          <input type="text" bind:value={nickDraft} placeholder="your name" maxlength="24" />
-          <button class="primary" type="submit">ok</button>
-        </form>
-      {:else}
-        <button class="ghost nickbtn" onclick={() => { nickDraft = store.nick; editingNick = true }} title="change your name">
-          <Icon name="spark" size={14} /> {store.nick || 'set your name'}
-        </button>
-      {/if}
     </div>
   </header>
 
   <main>
     <div class="col main-col">
       <NowPlaying />
-      <AddBar onAddToPlaylist={addToPlaylist} />
-      <Queue onAddToPlaylist={addToPlaylist} onSaveQueue={saveQueue} />
+      <AddBar />
+      <Queue />
     </div>
     <aside class="col side card rise" id="side" style="animation-delay: 180ms">
-      <nav class="tabs">
-        <button class:active={tab === 'playlists'} onclick={() => (tab = 'playlists')}><Icon name="list" size={16} /> Playlists</button>
-        <button class:active={tab === 'history'} onclick={() => (tab = 'history')}><Icon name="history" size={16} /> History</button>
-      </nav>
-      <div class="tab-body">
-        {#if tab === 'playlists'}
-          <Playlists bind:pendingTrack />
-        {:else}
-          <History onAddToPlaylist={addToPlaylist} />
-        {/if}
-      </div>
+      <h3 class="side-title"><Icon name="history" size={16} /> History</h3>
+      <History />
     </aside>
   </main>
 
   <footer class="faint">
-    chat commands in TeamSpeak: <span class="mono">!play &lt;link or search&gt;</span> · <span class="mono">!skip</span> · <span class="mono">!queue</span> · <span class="mono">!vol 50</span> · <span class="mono">!help</span>
+    chat commands in TeamSpeak: <span class="mono">!play &lt;link or search&gt;</span> · <span class="mono">!skip</span> · <span class="mono">!pause</span> · <span class="mono">!queue</span> · <span class="mono">!help</span>
   </footer>
 </div>
 
@@ -122,16 +76,11 @@
   .pill.off { color: var(--muted); }
   .pill.off .dot { background: var(--danger); }
   .sep { color: var(--faint); }
-  .nick { display: flex; gap: 6px; }
-  .nick input { width: 150px; padding: 6px 10px; }
-  .nickbtn { font-size: 13px; }
 
   main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 18px; align-items: start; }
   .col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
   .side { padding: 14px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 12px; }
-  .tabs button { background: none; border-color: transparent; color: var(--muted); font-family: var(--font-display); font-weight: 700; font-size: 15px; padding: 6px 10px; }
-  .tabs button.active { color: var(--text); background: var(--surface-2); }
+  .side-title { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 700; font-size: 15px; padding: 6px 10px 16px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
   footer { font-size: 12px; text-align: center; margin-top: auto; }
 
   .toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 50; pointer-events: none; max-width: min(92vw, 520px); }

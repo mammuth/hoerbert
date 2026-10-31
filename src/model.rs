@@ -1,4 +1,4 @@
-//! Shared data types: tracks, queue items, playlists and the state snapshot
+//! Shared data types: tracks, queue items and the state snapshot
 //! that is broadcast to the web UI.
 
 use serde::{Deserialize, Serialize};
@@ -45,15 +45,6 @@ impl QueueItem {
 	pub fn new(track: Track, requested_by: Option<String>) -> Self {
 		Self { id: Uuid::new_v4(), track, requested_by, added_at: now_ms(), request: false }
 	}
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Playlist {
-	pub id: Uuid,
-	pub name: String,
-	pub tracks: Vec<Track>,
-	pub created_at: u64,
-	pub updated_at: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -110,15 +101,6 @@ pub struct Playback {
 	pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct PlaylistSummary {
-	pub id: Uuid,
-	pub name: String,
-	pub count: usize,
-	pub duration: f64,
-	pub updated_at: u64,
-}
-
 /// Full state pushed to every web client on each change.
 #[derive(Clone, Debug, Serialize)]
 pub struct StateSnapshot {
@@ -127,7 +109,6 @@ pub struct StateSnapshot {
 	pub playback: Playback,
 	pub queue: Vec<QueueItem>,
 	pub history: Vec<QueueItem>,
-	pub playlists: Vec<PlaylistSummary>,
 	pub sponsorblock: bool,
 }
 

@@ -3,9 +3,7 @@
   import { fmtTime, fmtTotal } from './format'
   import Icon from './Icon.svelte'
   import { store } from './store.svelte'
-  import type { QueueItem, Track } from './types'
-
-  let { onAddToPlaylist, onSaveQueue }: { onAddToPlaylist?: (t: Track) => void; onSaveQueue?: () => void } = $props()
+  import type { QueueItem } from './types'
 
   const queue = $derived(store.snap?.queue ?? [])
   const total = $derived(queue.reduce((a, i) => a + (i.track.duration ?? 0), 0))
@@ -42,7 +40,6 @@
   <header>
     <h3>Up next <span class="count mono muted">{queue.length}{total ? ` · ${fmtTotal(total)}` : ''}</span></h3>
     <div class="acts">
-      <button class="ghost" title="save queue as playlist" disabled={!queue.length && !store.snap?.playback.item} onclick={() => onSaveQueue?.()}><Icon name="save" /> Save</button>
       <button class="ghost" title="shuffle" disabled={queue.length < 2} onclick={() => store.run(api.queueShuffle())}><Icon name="shuffle" /> Shuffle</button>
       <button class="ghost danger" title="clear queue" disabled={!queue.length} onclick={() => { if (confirm('Clear the whole queue?')) store.run(api.queueClear()) }}><Icon name="trash" /> Clear</button>
     </div>
@@ -81,7 +78,6 @@
           <div class="row-acts">
             <button class="icon ghost" title="move up" disabled={i === 0} onclick={() => move(item, -1)}><Icon name="up" size={16} /></button>
             <button class="icon ghost" title="move down" disabled={i === queue.length - 1} onclick={() => move(item, 1)}><Icon name="down" size={16} /></button>
-            {#if onAddToPlaylist}<button class="icon ghost" title="add to playlist" onclick={() => onAddToPlaylist?.(item.track)}><Icon name="heart" size={16} /></button>{/if}
             <button class="icon ghost danger" title="remove" onclick={() => store.run(api.queueRemove(item.id))}><Icon name="x" size={16} /></button>
           </div>
         </li>

@@ -1,4 +1,4 @@
-import type { Playlist, Track } from './types'
+import type { Track } from './types'
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -27,13 +27,4 @@ export const api = {
   queueRemove: (id: string) => req('POST', `/queue/${id}/remove`),
   queueMove: (id: string, to: number) => req('POST', `/queue/${id}/move`, { to }),
   queuePlay: (id: string) => req('POST', `/queue/${id}/play`),
-  playlist: (id: string) => req<Playlist>('GET', `/playlists/${id}`),
-  playlistCreate: (body: { name: string; tracks?: Track[]; import?: string }) => req<Playlist>('POST', '/playlists', body),
-  playlistFromQueue: (name: string) => req<Playlist>('POST', '/playlists/from-queue', { name }),
-  playlistDelete: (id: string) => req('DELETE', `/playlists/${id}`),
-  playlistRename: (id: string, name: string) => req('PATCH', `/playlists/${id}`, { name }),
-  playlistAddTracks: (id: string, body: { track?: Track; tracks?: Track[]; input?: string }) => req<{ added: number }>('POST', `/playlists/${id}/tracks`, body),
-  playlistRemoveTrack: (id: string, index: number) => req('DELETE', `/playlists/${id}/tracks/${index}`),
-  playlistEnqueue: (id: string, shuffle: boolean, requested_by?: string) => req<{ queued: number }>('POST', `/playlists/${id}/enqueue`, { shuffle, requested_by }),
-  playlistImport: (id: string, url: string) => req<{ added: number }>('POST', `/playlists/${id}/import`, { url }),
 }

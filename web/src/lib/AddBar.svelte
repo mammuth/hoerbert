@@ -5,8 +5,7 @@
   import { store } from './store.svelte'
   import type { Track } from './types'
 
-  let { onAddToPlaylist }: { onAddToPlaylist?: (t: Track) => void } = $props()
-
+  let nick = $state(store.nick)
   let query = $state('')
   let results = $state<Track[]>([])
   let busy = $state(false)
@@ -36,7 +35,7 @@
     const q = query.trim()
     if (!q) return
     busy = true
-    const r = await store.run(api.add({ input: q, requested_by: store.nick || undefined, ...opts }))
+    const r = await store.runAs((who) => api.add({ input: q, requested_by: who, ...opts }))
     busy = false
     if (r) {
       store.toast(r.added.length === 1 ? `Queued: ${r.added[0].title}` : `Queued ${r.added.length} tracks${r.playlist ? ` from “${r.playlist}”` : ''}`)
@@ -45,7 +44,7 @@
   }
 
   async function addTrack(t: Track, opts: { next?: boolean; play_now?: boolean } = {}) {
-    const r = await store.run(api.add({ track: t, requested_by: store.nick || undefined, ...opts }))
+    const r = await store.runAs((who) => api.add({ track: t, requested_by: who, ...opts }))
     if (r) store.toast(`Queued: ${t.title}`)
   }
 
@@ -57,6 +56,20 @@
 
 <section class="add card rise" style="animation-delay: 60ms">
   <div class="row">
+    <div class="field name" class:missing={!store.nick}>
+      <span class="lead"><Icon name="spark" /></span>
+      <input
+        id="nick"
+        bind:value={nick}
+        oninput={() => store.setNick(nick)}
+        type="text"
+        placeholder="Your name"
+        maxlength="24"
+        autocomplete="nickname"
+        spellcheck="false"
+        required
+      />
+    </div>
     <div class="field">
       <span class="lead"><Icon name={isUrl ? 'link' : 'search'} /></span>
       <input
@@ -74,14 +87,17 @@
         <button class="ghost icon clear" title="clear" onclick={() => { query = ''; results = []; open = false; inputEl?.focus() }}><Icon name="x" size={14} /></button>
       {/if}
     </div>
-    <button class="primary" disabled={!query.trim() || busy} onclick={() => submit()}>
+    <button class="primary" disabled={!query.trim() || !store.nick || busy} onclick={() => submit()}>
       <Icon name="plus" /> Add
     </button>
-    <button disabled={!query.trim() || busy} title="play right after the current track" onclick={() => submit({ next: true })}>
+    <button disabled={!query.trim() || !store.nick || busy} title="play right after the current track" onclick={() => submit({ next: true })}>
       <Icon name="next" /> Next
     </button>
   </div>
-  <div class="hint faint">Enter adds · Shift+Enter plays next · tracks are requested as <strong>{store.nick || 'anonymous'}</strong></div>
+  <div class="hint faint">
+    {#if store.nick}Enter adds · Shift+Enter plays next · tracks are requested as <strong>{store.nick}</strong>
+    {:else}<span class="need">Enter your name to add songs</span>{/if}
+  </div>
 
   {#if open && results.length}
     <ul class="results">
@@ -95,9 +111,6 @@
           <div class="acts">
             <button class="icon" title="queue" onclick={() => addTrack(t)}><Icon name="plus" /></button>
             <button class="icon ghost" title="play next" onclick={() => addTrack(t, { next: true })}><Icon name="next" /></button>
-            {#if onAddToPlaylist}
-              <button class="icon ghost" title="add to playlist" onclick={() => onAddToPlaylist?.(t)}><Icon name="heart" /></button>
-            {/if}
           </div>
         </li>
       {/each}
@@ -112,6 +125,10 @@
   .field { position: relative; flex: 1; display: flex; align-items: center; }
   .field input { padding-left: 38px; padding-right: 36px; height: 42px; }
   .lead { position: absolute; left: 12px; color: var(--faint); display: flex; }
+  .name { flex: 0 0 160px; }
+  .name input { padding-right: 12px; }
+  .name.missing input { border-color: var(--accent); }
+  .name.missing .lead, .need { color: var(--accent); }
   .clear { position: absolute; right: 4px; width: 30px; height: 30px; }
   .hint { font-size: 12px; }
   .hint strong { color: var(--muted); font-weight: 500; }
@@ -126,7 +143,7 @@
   .close { grid-template-columns: 1fr !important; justify-items: center; }
   @media (max-width: 560px) {
     .row { flex-wrap: wrap; }
-    .field { flex-basis: 100%; }
+    .field, .name { flex-basis: 100%; }
     .row > button { flex: 1; justify-content: center; }
     .acts .ghost { display: none; }
   }

@@ -11,7 +11,7 @@ use axum::{Json, Router};
 use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::json;
-use tracing::{debug, warn};
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::model::{LoopMode, Track};
@@ -43,6 +43,12 @@ impl From<anyhow::Error> for ApiError {
 }
 
 fn bad(msg: impl Into<String>) -> ApiError { ApiError(StatusCode::BAD_REQUEST, msg.into()) }
+
+/// Web requests must say who they are; anonymous adds are rejected.
+fn requester(r: Option<String>) -> Result<String, ApiError> {
+	r.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).ok_or_else(|| bad("enter your name before adding songs"))
+}
+
 fn not_found() -> ApiError { ApiError(StatusCode::NOT_FOUND, "not found".into()) }
 fn ok() -> ApiResult { Ok(Json(json!({ "ok": true })).into_response()) }
 
@@ -61,14 +67,7 @@ pub fn router(state: AppState) -> Router {
 		.route("/queue/shuffle", post(queue_shuffle))
 		.route("/queue/{id}/remove", post(queue_remove))
 		.route("/queue/{id}/move", post(queue_move))
-		.route("/queue/{id}/play", post(queue_play))
-		.route("/playlists", get(playlists_list).post(playlists_create))
-		.route("/playlists/from-queue", post(playlists_from_queue))
-		.route("/playlists/{id}", get(playlist_get).delete(playlist_delete).patch(playlist_rename))
-		.route("/playlists/{id}/tracks", post(playlist_add_tracks))
-		.route("/playlists/{id}/tracks/{index}", axum::routing::delete(playlist_remove_track))
-		.route("/playlists/{id}/enqueue", post(playlist_enqueue))
-		.route("/playlists/{id}/import", post(playlist_import));
+		.route("/queue/{id}/play", post(queue_play));
 	Router::new()
 		.nest("/api", api)
 		.fallback(static_handler)
@@ -174,6 +173,7 @@ struct AddBody {
 }
 
 async fn add(State(s): State<AppState>, Json(body): Json<AddBody>) -> ApiResult {
+	let requested_by = Some(requester(body.requested_by)?);
 	let mut name = None;
 	let tracks = if let Some(t) = body.track {
 		vec![t]
@@ -190,7 +190,6 @@ async fn add(State(s): State<AppState>, Json(body): Json<AddBody>) -> ApiResult 
 		return Err(ApiError(StatusCode::NOT_FOUND, "nothing found".into()));
 	}
 	let added = tracks.clone();
-	let requested_by = body.requested_by.filter(|r| !r.trim().is_empty());
 	s.player.send(Cmd::Add { tracks, requested_by, next: body.next, play_now: body.play_now }).await;
 	Ok(Json(json!({ "added": added, "playlist": name })).into_response())
 }
@@ -272,127 +271,4 @@ async fn queue_move(State(s): State<AppState>, Path(id): Path<Uuid>, Json(b): Js
 async fn queue_play(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
 	s.player.send(Cmd::PlayItem(id)).await;
 	ok()
-}
-
-// --------------------------------------------------------------- playlists
-
-async fn playlists_list(State(s): State<AppState>) -> ApiResult {
-	Ok(Json(json!({ "playlists": s.player.snapshot().playlists })).into_response())
-}
-
-#[derive(Deserialize)]
-struct PlaylistCreateBody {
-	name: String,
-	#[serde(default)]
-	tracks: Vec<Track>,
-	/// Optional URL (e.g. a YouTube playlist) to import tracks from.
-	#[serde(default)]
-	import: Option<String>,
-}
-
-async fn playlists_create(State(s): State<AppState>, Json(b): Json<PlaylistCreateBody>) -> ApiResult {
-	let mut name = b.name.trim().to_string();
-	let mut tracks = b.tracks;
-	if let Some(url) = b.import.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-		let (n, t) = s.resolver.resolve_input(url).await?;
-		if name.is_empty() {
-			name = n.unwrap_or_else(|| "Imported".into());
-		}
-		tracks.extend(t);
-	}
-	if name.is_empty() {
-		return Err(bad("name required"));
-	}
-	let pl = s.player.playlist_create(name, tracks).await.ok_or_else(|| bad("player gone"))?;
-	Ok(Json(pl).into_response())
-}
-
-#[derive(Deserialize)]
-struct FromQueueBody {
-	name: String,
-}
-async fn playlists_from_queue(State(s): State<AppState>, Json(b): Json<FromQueueBody>) -> ApiResult {
-	let name = b.name.trim().to_string();
-	if name.is_empty() {
-		return Err(bad("name required"));
-	}
-	let pl = s.player.playlist_from_queue(name).await.ok_or_else(|| bad("player gone"))?;
-	Ok(Json(pl).into_response())
-}
-
-async fn playlist_get(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
-	let pl = s.player.get_playlist(id).await.ok_or_else(not_found)?;
-	Ok(Json(pl).into_response())
-}
-async fn playlist_delete(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
-	s.player.send(Cmd::PlaylistDelete(id)).await;
-	ok()
-}
-#[derive(Deserialize)]
-struct RenameBody {
-	name: String,
-}
-async fn playlist_rename(State(s): State<AppState>, Path(id): Path<Uuid>, Json(b): Json<RenameBody>) -> ApiResult {
-	if b.name.trim().is_empty() {
-		return Err(bad("name required"));
-	}
-	s.player.send(Cmd::PlaylistRename { id, name: b.name.trim().to_string() }).await;
-	ok()
-}
-
-#[derive(Deserialize)]
-struct AddTracksBody {
-	#[serde(default)]
-	track: Option<Track>,
-	#[serde(default)]
-	tracks: Option<Vec<Track>>,
-	#[serde(default)]
-	input: Option<String>,
-}
-async fn playlist_add_tracks(State(s): State<AppState>, Path(id): Path<Uuid>, Json(b): Json<AddTracksBody>) -> ApiResult {
-	let mut tracks = b.tracks.unwrap_or_default();
-	if let Some(t) = b.track {
-		tracks.push(t);
-	}
-	if let Some(input) = b.input.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-		tracks.extend(s.resolver.resolve_input(input).await?.1);
-	}
-	if tracks.is_empty() {
-		return Err(bad("no tracks"));
-	}
-	let n = tracks.len();
-	s.player.send(Cmd::PlaylistAddTracks { id, tracks }).await;
-	Ok(Json(json!({ "added": n })).into_response())
-}
-async fn playlist_remove_track(State(s): State<AppState>, Path((id, index)): Path<(Uuid, usize)>) -> ApiResult {
-	s.player.send(Cmd::PlaylistRemoveTrack { id, index }).await;
-	ok()
-}
-
-#[derive(Deserialize, Default)]
-struct EnqueueBody {
-	#[serde(default)]
-	shuffle: bool,
-	#[serde(default)]
-	requested_by: Option<String>,
-}
-async fn playlist_enqueue(State(s): State<AppState>, Path(id): Path<Uuid>, body: Option<Json<EnqueueBody>>) -> ApiResult {
-	let b = body.map(|j| j.0).unwrap_or_default();
-	let n = s.player.playlist_enqueue(id, b.shuffle, b.requested_by).await?;
-	Ok(Json(json!({ "queued": n })).into_response())
-}
-
-#[derive(Deserialize)]
-struct ImportBody {
-	url: String,
-}
-async fn playlist_import(State(s): State<AppState>, Path(id): Path<Uuid>, Json(b): Json<ImportBody>) -> ApiResult {
-	let (_, tracks) = s.resolver.resolve_input(b.url.trim()).await?;
-	if tracks.is_empty() {
-		warn!("import yielded no tracks");
-		return Err(ApiError(StatusCode::NOT_FOUND, "nothing found".into()));
-	}
-	let n = tracks.len();
-	s.player.send(Cmd::PlaylistAddTracks { id, tracks }).await;
-	Ok(Json(json!({ "added": n })).into_response())
 }
