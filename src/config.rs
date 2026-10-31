@@ -23,6 +23,7 @@ pub struct Config {
 	pub default_volume: f32,
 	pub command_prefix: String,
 	pub help_suffix: Option<String>,
+	pub soundboard_file: PathBuf,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -43,6 +44,7 @@ impl Config {
 			.map(|s| s.trim().to_string())
 			.filter(|s| !s.is_empty())
 			.collect();
+		let data_dir = env("DATA_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data"));
 		Ok(Self {
 			ts_address,
 			ts_name: env("TS_NAME").unwrap_or_else(|| "Hörbert".into()),
@@ -51,7 +53,8 @@ impl Config {
 			ts_server_password: env("TS_SERVER_PASSWORD"),
 			web_bind: env("WEB_BIND").unwrap_or_else(|| "0.0.0.0:8080".into()),
 			public_url: env("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string()),
-			data_dir: env("DATA_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data")),
+			soundboard_file: env("SOUNDBOARD_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("sounds.json")),
+			data_dir,
 			ytdlp_bin: env("YTDLP_BIN").unwrap_or_else(|| "yt-dlp".into()),
 			ffmpeg_bin: env("FFMPEG_BIN").unwrap_or_else(|| "ffmpeg".into()),
 			ytdlp_args,

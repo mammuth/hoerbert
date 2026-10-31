@@ -5,6 +5,7 @@
   import Icon from './lib/Icon.svelte'
   import NowPlaying from './lib/NowPlaying.svelte'
   import Queue from './lib/Queue.svelte'
+  import Soundboard from './lib/Soundboard.svelte'
   import { store } from './lib/store.svelte'
 
   onMount(() => {
@@ -44,6 +45,7 @@
       <Queue />
     </div>
     <aside class="col side card rise" id="side" style="animation-delay: 180ms">
+      <Soundboard />
       <h3 class="side-title"><Icon name="history" size={16} /> History</h3>
       <History />
     </aside>

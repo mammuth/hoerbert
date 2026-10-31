@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::model::Track;
 use crate::player::{Cmd, PlayerHandle};
 use crate::resolver::Resolver;
+use crate::soundboard::Soundboard;
 
 #[derive(Embed)]
 #[folder = "web/dist/"]
@@ -26,6 +27,7 @@ struct Assets;
 pub struct AppState {
 	pub player: PlayerHandle,
 	pub resolver: Resolver,
+	pub soundboard: Soundboard,
 }
 
 type ApiResult = Result<Response, ApiError>;
@@ -63,7 +65,9 @@ pub fn router(state: AppState) -> Router {
 		.route("/queue/clear", post(queue_clear))
 		.route("/queue/{id}/remove", post(queue_remove))
 		.route("/queue/{id}/move", post(queue_move))
-		.route("/queue/{id}/play", post(queue_play));
+		.route("/queue/{id}/play", post(queue_play))
+		.route("/sounds", get(sounds))
+		.route("/sounds/{slug}/play", post(sound_play));
 	Router::new()
 		.nest("/api", api)
 		.fallback(static_handler)
@@ -235,5 +239,16 @@ async fn queue_move(State(s): State<AppState>, Path(id): Path<Uuid>, Json(b): Js
 }
 async fn queue_play(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
 	s.player.send(Cmd::PlayItem(id)).await;
+	ok()
+}
+
+// -------------------------------------------------------------- soundboard
+
+async fn sounds(State(s): State<AppState>) -> Response {
+	Json(json!({ "sounds": s.soundboard.list() })).into_response()
+}
+async fn sound_play(State(s): State<AppState>, Path(slug): Path<String>) -> ApiResult {
+	let sound = s.soundboard.get(&slug.to_ascii_lowercase()).ok_or_else(not_found)?;
+	s.player.send(Cmd::PlaySound(sound.url)).await;
 	ok()
 }

@@ -17,6 +17,12 @@ export interface QueueItem {
   request?: boolean
 }
 
+export interface Sound {
+  slug: string
+  name: string
+  emoji?: string
+}
+
 export interface Segment { start: number; end: number; category: string }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused'

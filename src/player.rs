@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 use tsclientlib::MessageTarget;
 use uuid::Uuid;
 
-use crate::audio::{Decoder, Pull, FRAME_LEN};
+use crate::audio::{Decoder, Frame, Pull, FRAME_LEN};
 use crate::config::Config;
 use crate::model::*;
 use crate::resolver::{Resolver, StreamInfo};
@@ -46,6 +46,8 @@ pub enum Cmd {
 	PlayItem(Uuid),
 	Clear,
 	TsStatus(TsStatus),
+	/// Soundboard clip (ffmpeg input), mixed over the music.
+	PlaySound(String),
 }
 
 #[derive(Clone)]
@@ -117,6 +119,8 @@ pub struct Player {
 	queue: Vec<QueueItem>,
 	history: Vec<QueueItem>,
 	current: Option<Current>,
+	/// Soundboard clip currently playing.
+	sfx: Option<Decoder>,
 	volume: f32,
 	ts_status: TsStatus,
 	last_error: Option<String>,
@@ -167,6 +171,7 @@ pub fn spawn(
 		resolver,
 		http: reqwest::Client::builder().user_agent("hoerbert/0.1").build()?,
 		current: None,
+		sfx: None,
 		ts_status,
 		last_error: None,
 		resolve_failures: 0,
@@ -378,6 +383,17 @@ impl Player {
 			Cmd::Clear => {
 				self.queue.clear();
 				self.dirty = true;
+			}
+			Cmd::PlaySound(url) => {
+				// A new clip replaces the one still playing.
+				if let Some(d) = self.sfx.take() {
+					tokio::spawn(d.kill());
+				}
+				let stream = StreamInfo { url, headers: HashMap::new(), is_live: false, duration: None, direct: true, available_at: None };
+				match Decoder::spawn_url(&self.cfg, &stream, 0.0) {
+					Ok(d) => self.sfx = Some(d),
+					Err(e) => warn!(error = %e, url = %stream.url, "could not start sound"),
+				}
 			}
 			Cmd::TsStatus(s) => {
 				let listening = s.listeners > 0;
@@ -693,6 +709,7 @@ impl Player {
 		let mut retry: Option<(f64, bool)> = None; // (position, use_pipe)
 		let mut skip_to: Option<f64> = None;
 		let mut publish = false;
+		let mut music: Option<Frame> = None;
 
 		if self.empty_since.is_some_and(|t| t.elapsed() > EMPTY_CHANNEL_GRACE)
 			&& self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Playing)
@@ -718,20 +735,10 @@ impl Player {
 							c.stats.max_late_ms = c.stats.max_late_ms.max(late.as_millis() as u64);
 						}
 						match dec.pull() {
-							Pull::Frame(mut pcm) => {
+							Pull::Frame(pcm) => {
 								c.frames_played += 1;
 								c.starved_ticks = 0;
-								apply_gain(&mut pcm, self.volume);
-								match self.encoder.encode(&pcm[..FRAME_LEN], &mut self.opus_buf) {
-									Ok(len) => {
-										if self.audio_tx.try_send(AudioOut::Frame(self.opus_buf[..len].to_vec())).is_ok() {
-											c.talking = true;
-										} else {
-											c.stats.dropped += 1;
-										}
-									}
-									Err(e) => warn!(error = %e, "opus encode failed"),
-								}
+								music = Some(pcm);
 								let pos = c.position();
 								if let Some(seg) = c.segments.iter().find(|s| pos >= s.start && pos < s.end - 0.1) {
 									debug!(category = %seg.category, from = pos, to = seg.end, "sponsorblock skip");
@@ -782,6 +789,33 @@ impl Player {
 			}
 		}
 
+		let has_music = music.is_some();
+		let frame = match (music, self.pull_sfx()) {
+			(Some(mut m), Some(s)) => {
+				for (a, b) in m.iter_mut().zip(&s) {
+					*a = a.saturating_add(*b);
+				}
+				Some(m)
+			}
+			(m, s) => m.or(s),
+		};
+		if let Some(mut pcm) = frame {
+			apply_gain(&mut pcm, self.volume);
+			match self.encoder.encode(&pcm[..FRAME_LEN], &mut self.opus_buf) {
+				Ok(len) => {
+					let sent = self.audio_tx.try_send(AudioOut::Frame(self.opus_buf[..len].to_vec())).is_ok();
+					if let Some(c) = self.current.as_mut().filter(|_| has_music) {
+						if sent {
+							c.talking = true;
+						} else {
+							c.stats.dropped += 1;
+						}
+					}
+				}
+				Err(e) => warn!(error = %e, "opus encode failed"),
+			}
+		}
+
 		if let Some(pos) = skip_to {
 			self.seek(pos);
 			publish = true;
@@ -799,6 +833,28 @@ impl Player {
 		}
 		if publish || (self.current.is_some() && self.last_publish.elapsed() > Duration::from_secs(3)) {
 			self.publish();
+		}
+	}
+
+	/// Next frame of the soundboard clip, if one is playing and has data.
+	fn pull_sfx(&mut self) -> Option<Frame> {
+		let dec = self.sfx.as_mut()?;
+		match dec.pull() {
+			Pull::Frame(f) => Some(f),
+			Pull::Starved => None,
+			Pull::Ended => {
+				if dec.produced_frames == 0 {
+					warn!(error = %dec.error_tail(), "sound produced no audio");
+				}
+				if let Some(d) = self.sfx.take() {
+					tokio::spawn(d.kill());
+				}
+				// Stop talking unless the music keeps going.
+				if !self.current.as_ref().is_some_and(|c| c.talking) {
+					let _ = self.audio_tx.try_send(AudioOut::End);
+				}
+				None
+			}
 		}
 	}
 

@@ -4,6 +4,7 @@ mod config;
 mod model;
 mod player;
 mod resolver;
+mod soundboard;
 mod sponsorblock;
 mod store;
 mod ts;
@@ -25,6 +26,7 @@ async fn main() -> Result<()> {
 
 	let store = store::Store::new(&cfg.data_dir)?;
 	let resolver = resolver::Resolver::new(cfg.clone());
+	let soundboard = soundboard::Soundboard::new(cfg.soundboard_file.clone());
 
 	// Opus frames: player → TeamSpeak thread. Small buffer: we pace at 20 ms.
 	let (audio_tx, audio_rx) = mpsc::channel(32);
@@ -44,11 +46,17 @@ async fn main() -> Result<()> {
 	});
 
 	tokio::spawn(chat::run(
-		chat::ChatContext { cfg: cfg.clone(), player: player.clone(), resolver: resolver.clone(), ts_tx: ts_cmd_tx },
+		chat::ChatContext {
+			cfg: cfg.clone(),
+			player: player.clone(),
+			resolver: resolver.clone(),
+			soundboard: soundboard.clone(),
+			ts_tx: ts_cmd_tx,
+		},
 		ts_event_rx,
 	));
 
-	let app = web::router(web::AppState { player, resolver });
+	let app = web::router(web::AppState { player, resolver, soundboard });
 	let listener = tokio::net::TcpListener::bind(&cfg.web_bind).await.with_context(|| format!("binding {}", cfg.web_bind))?;
 	info!("web ui listening on http://{}", cfg.web_bind);
 	axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;

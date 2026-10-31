@@ -8,12 +8,14 @@ use crate::config::Config;
 use crate::model::{fmt_duration, PlaybackStatus};
 use crate::player::{Cmd, PlayerHandle};
 use crate::resolver::Resolver;
+use crate::soundboard::Soundboard;
 use crate::ts::{TsCmd, TsEvent};
 
 pub struct ChatContext {
 	pub cfg: Config,
 	pub player: PlayerHandle,
 	pub resolver: Resolver,
+	pub soundboard: Soundboard,
 	pub ts_tx: mpsc::Sender<TsCmd>,
 }
 
@@ -66,7 +68,10 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 	info!(user = %invoker.name, command = %cmd, arg = %arg, "chat command");
 	let snap = ctx.player.snapshot();
 	match cmd.as_str() {
-		"help" | "h" | "?" => Some(help(prefix, ctx.cfg.public_url.as_deref(), ctx.cfg.help_suffix.as_deref())),
+		"help" | "h" | "?" => {
+			let has_sounds = !ctx.soundboard.list().is_empty();
+			Some(help(prefix, ctx.cfg.public_url.as_deref(), ctx.cfg.help_suffix.as_deref(), has_sounds))
+		}
 		"play" | "p" | "add" | "search" | "yt" | "next" | "playnow" => {
 			if arg.is_empty() {
 				if snap.playback.status == PlaybackStatus::Paused {
@@ -143,7 +148,23 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 			Some(u) => format!("🎛 {u}"),
 			None => "web ui url not configured (PUBLIC_URL)".into(),
 		}),
-		_ => None,
+		"soundboard" | "sounds" | "sb" => {
+			let sounds = ctx.soundboard.list();
+			if sounds.is_empty() {
+				return Some("no sounds configured".into());
+			}
+			let mut s = "🔊 Soundboard".to_string();
+			for sound in sounds {
+				s.push_str(&format!("\n{} {prefix}{} – {}", sound.emoji.as_deref().unwrap_or("🔈"), sound.slug, sound.name));
+			}
+			Some(s)
+		}
+		// Built-in commands above win over sounds with the same slug.
+		slug => {
+			let sound = ctx.soundboard.get(slug)?;
+			ctx.player.send(Cmd::PlaySound(sound.url)).await;
+			None
+		}
 	}
 }
 
@@ -169,7 +190,7 @@ fn now_playing(snap: &crate::model::StateSnapshot) -> String {
 	}
 }
 
-fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>) -> String {
+fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>, has_sounds: bool) -> String {
 	let mut s = format!(
 		"🎵 Hörbert\n\
 		 {p}play <link or search> – add to queue\n\
@@ -178,6 +199,9 @@ fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>) -> String {
 		 {p}now · {p}queue · {p}clear",
 		p = prefix
 	);
+	if has_sounds {
+		s.push_str(&format!("\n{prefix}soundboard – list sounds"));
+	}
 	if let Some(u) = url {
 		s.push_str(&format!("\n🎛 {u}"));
 	}

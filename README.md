@@ -40,6 +40,7 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `SPONSORBLOCK_CATEGORIES` | `sponsor,selfpromo,interaction,music_offtopic` | which categories to skip |
 | `COMMAND_PREFIX` | `!` | chat command prefix |
 | `HELP_SUFFIX` | — | extra text appended to `!help` (`\n` for line breaks) |
+| `SOUNDBOARD_FILE` | `$DATA_DIR/sounds.json` | soundboard config, see below |
 | `YTDLP_ARGS` | — | extra yt-dlp args (cookies, player clients, PO token provider) |
 | `YTDLP_AUTO_UPDATE` | `true` | `pip install -U yt-dlp` on container start |
 | `DATA_DIR` | `data` | state + identity |
@@ -55,7 +56,24 @@ auth if the port is reachable from the internet.
 !next <link or search>   play right after the current track
 !skip  !prev  !pause
 !now  !queue  !clear
+!soundboard              list sounds, play one with !<slug>
 ```
+
+### Soundboard
+
+List short clips in `./data/sounds.json`; each becomes a `!<slug>` chat
+command and a button in the web UI. Clips are mixed over the music.
+
+```json
+[
+  { "slug": "airhorn", "name": "Airhorn", "emoji": "📯", "url": "sounds/airhorn.mp3" },
+  { "slug": "rimshot", "name": "Rimshot", "emoji": "🥁", "url": "https://example.com/rimshot.ogg" }
+]
+```
+
+`url` is anything ffmpeg reads; relative paths resolve against the file's
+directory. Slugs are `[a-z0-9_-]`; built-in commands win over equal slugs. The
+file is re-read on use, so edits apply without a restart.
 
 ## When YouTube says “Sign in to confirm you’re not a bot”
 

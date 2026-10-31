@@ -1,4 +1,4 @@
-import type { Track } from './types'
+import type { Sound, Track } from './types'
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -23,4 +23,6 @@ export const api = {
   queueRemove: (id: string) => req('POST', `/queue/${id}/remove`),
   queueMove: (id: string, to: number) => req('POST', `/queue/${id}/move`, { to }),
   queuePlay: (id: string) => req('POST', `/queue/${id}/play`),
+  sounds: () => req<{ sounds: Sound[] }>('GET', '/sounds'),
+  playSound: (slug: string) => req('POST', `/sounds/${encodeURIComponent(slug)}/play`),
 }
