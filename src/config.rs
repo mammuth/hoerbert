@@ -22,6 +22,7 @@ pub struct Config {
 	pub opus_bitrate: i32,
 	pub default_volume: f32,
 	pub command_prefix: String,
+	pub help_suffix: Option<String>,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -59,6 +60,7 @@ impl Config {
 			opus_bitrate: env("OPUS_BITRATE").and_then(|v| v.parse().ok()).unwrap_or(128_000),
 			default_volume: env("DEFAULT_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(0.1),
 			command_prefix: env("COMMAND_PREFIX").unwrap_or_else(|| "!".into()),
+			help_suffix: env("HELP_SUFFIX").map(|s| s.replace("\\n", "\n")),
 		})
 	}
 }

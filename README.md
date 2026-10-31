@@ -39,6 +39,7 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `SPONSORBLOCK` | `true` | skip SponsorBlock segments on YouTube |
 | `SPONSORBLOCK_CATEGORIES` | `sponsor,selfpromo,interaction,music_offtopic` | which categories to skip |
 | `COMMAND_PREFIX` | `!` | chat command prefix |
+| `HELP_SUFFIX` | — | extra text appended to `!help` (`\n` for line breaks) |
 | `YTDLP_ARGS` | — | extra yt-dlp args (cookies, player clients, PO token provider) |
 | `YTDLP_AUTO_UPDATE` | `true` | `pip install -U yt-dlp` on container start |
 | `DATA_DIR` | `data` | state + identity |

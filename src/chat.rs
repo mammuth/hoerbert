@@ -66,7 +66,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 	info!(user = %invoker.name, command = %cmd, arg = %arg, "chat command");
 	let snap = ctx.player.snapshot();
 	match cmd.as_str() {
-		"help" | "h" | "?" => Some(help(prefix, ctx.cfg.public_url.as_deref())),
+		"help" | "h" | "?" => Some(help(prefix, ctx.cfg.public_url.as_deref(), ctx.cfg.help_suffix.as_deref())),
 		"play" | "p" | "add" | "search" | "yt" | "next" | "playnow" => {
 			if arg.is_empty() {
 				if snap.playback.status == PlaybackStatus::Paused {
@@ -169,7 +169,7 @@ fn now_playing(snap: &crate::model::StateSnapshot) -> String {
 	}
 }
 
-fn help(prefix: &str, url: Option<&str>) -> String {
+fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>) -> String {
 	let mut s = format!(
 		"🎵 Hörbert\n\
 		 {p}play <link or search> – add to queue\n\
@@ -180,6 +180,10 @@ fn help(prefix: &str, url: Option<&str>) -> String {
 	);
 	if let Some(u) = url {
 		s.push_str(&format!("\n🎛 {u}"));
+	}
+	if let Some(x) = suffix {
+		s.push('\n');
+		s.push_str(x);
 	}
 	s
 }
