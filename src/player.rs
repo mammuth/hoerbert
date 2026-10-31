@@ -409,13 +409,13 @@ impl Player {
 						info!("moved to listeners, starting queue");
 						self.start_next().await;
 						if let Some(c) = &self.current {
-							self.announce(format!("Starting the queue: {}", c.item.track.title));
+							self.announce(format!("Starting the queue: {} (type {}help to control me)", c.item.track.title, self.cfg.command_prefix));
 						}
 					} else if self.auto_paused || (moved && paused) {
 						info!(moved, "listeners are here, resuming");
 						self.set_paused(false);
 						if let Some(c) = &self.current {
-							self.announce(format!("Resuming: {}", c.item.track.title));
+							self.announce(format!("Resuming: {} (type {}help to control me)", c.item.track.title, self.cfg.command_prefix));
 						}
 					}
 				}
