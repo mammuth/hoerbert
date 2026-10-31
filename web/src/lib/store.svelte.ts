@@ -6,6 +6,8 @@ class Store {
   now = $state(Date.now())
   nick = $state<string>('')
   toasts = $state<{ id: number; text: string; kind: 'info' | 'error' }[]>([])
+  /** Browser clock minus server clock, so extrapolation survives clock skew. */
+  private clockOffset = 0
   private ws: WebSocket | null = null
   private retry = 1000
   private toastId = 0
@@ -25,7 +27,7 @@ class Store {
     const p = this.snap?.playback
     if (!p) return 0
     if (p.status !== 'playing') return p.position
-    const elapsed = (this.now - p.position_at) / 1000
+    const elapsed = (this.now - this.clockOffset - p.position_at) / 1000
     const pos = p.position + Math.max(0, elapsed)
     const dur = p.item?.track.duration
     return dur ? Math.min(pos, dur) : pos
@@ -37,7 +39,11 @@ class Store {
     this.ws = ws
     ws.onopen = () => { this.connected = true; this.retry = 1000 }
     ws.onmessage = (ev) => {
-      try { this.snap = JSON.parse(ev.data) as Snapshot } catch {}
+      try {
+        const snap = JSON.parse(ev.data) as Snapshot
+        this.clockOffset = Date.now() - snap.server_now
+        this.snap = snap
+      } catch {}
     }
     ws.onclose = () => {
       this.connected = false

@@ -50,4 +50,6 @@ export interface Snapshot {
   playback: Playback
   queue: QueueItem[]
   history: QueueItem[]
+  /** Server clock (unix ms) when this message was sent. */
+  server_now: number
 }

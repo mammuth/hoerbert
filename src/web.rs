@@ -110,7 +110,12 @@ async fn ws(ws: WebSocketUpgrade, State(s): State<AppState>) -> Response {
 
 async fn ws_loop(mut socket: WebSocket, player: PlayerHandle) {
 	let mut rx = player.subscribe();
-	let send = |snap: Arc<crate::model::StateSnapshot>| Message::Text(serde_json::to_string(&*snap).unwrap_or_default().into());
+	// `server_now` lets clients extrapolate `position_at` without trusting their own clock.
+	let send = |snap: Arc<crate::model::StateSnapshot>| {
+		let mut v = serde_json::to_value(&*snap).unwrap_or_default();
+		v["server_now"] = json!(crate::model::now_ms());
+		Message::Text(v.to_string().into())
+	};
 	let first = rx.borrow().clone();
 	if socket.send(send(first)).await.is_err() {
 		return;
