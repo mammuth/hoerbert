@@ -210,8 +210,10 @@ async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
 	let mut packet_id: u16 = 0;
 	let mut muted_warned = false;
 	let mut shutdown = chans.shutdown.clone();
+	let mut net_stats = tokio::time::interval(Duration::from_secs(30));
 	loop {
 		tokio::select! {
+			_ = net_stats.tick() => log_network_stats(&con),
 			_ = shutdown.changed() => {
 				info!("disconnecting from teamspeak");
 				let _ = con.disconnect(tsclientlib::DisconnectOptions::new());
@@ -287,6 +289,18 @@ async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
 				}
 			}
 		}
+	}
+}
+
+/// Path health; packet loss is measured server → bot (keepalives).
+fn log_network_stats(con: &Connection) {
+	let Ok(s) = con.get_network_stats() else { return };
+	let (rtt_ms, rtt_dev_ms) = (s.rtt.as_millis() as u64, s.rtt_dev.as_millis() as u64);
+	let loss = s.get_packetloss_s2c_keepalive();
+	if loss > 0.01 || rtt_dev_ms > 30 {
+		warn!(rtt_ms, rtt_dev_ms, loss, "network stats: unstable connection");
+	} else {
+		debug!(rtt_ms, rtt_dev_ms, loss, "network stats");
 	}
 }
 

@@ -24,6 +24,8 @@ use crate::ts::AudioOut;
 const HISTORY_MAX: usize = 50;
 /// Stop instead of skipping after this many unresolvable tracks in a row.
 const MAX_RESOLVE_FAILURES: u32 = 3;
+/// Ticks later than this count as late (risk of audible jitter).
+const LATE_TICK: Duration = Duration::from_millis(10);
 const PREBUFFER_FRAMES: usize = 25; // 0.5 s before we start talking
 const STREAM_CACHE_TTL: Duration = Duration::from_secs(45 * 60);
 const MAX_RETRIES: u8 = 2;
@@ -114,6 +116,20 @@ struct Current {
 	retries: u8,
 	pipe_fallback: bool,
 	talking: bool,
+	stats: PlayStats,
+}
+
+/// Per-track playback health, logged when the track ends.
+#[derive(Default)]
+struct PlayStats {
+	/// Frames the TeamSpeak thread could not take (silently lost audio).
+	dropped: u32,
+	/// Decoder underruns after prebuffering, and their total length.
+	stalls: u32,
+	stall_ticks: u32,
+	/// Ticks that fired more than LATE_TICK late.
+	late_ticks: u32,
+	max_late_ms: u64,
 }
 
 impl Current {
@@ -227,7 +243,7 @@ impl Player {
 		self.publish();
 		loop {
 			tokio::select! {
-				_ = tick.tick() => self.on_tick().await,
+				t = tick.tick() => self.on_tick(t.elapsed()).await,
 				Some(cmd) = cmd_rx.recv() => {
 					self.handle(cmd).await;
 					// The queue head may have changed (request added, moved…).
@@ -580,6 +596,7 @@ impl Player {
 			prebuffered: false,
 			starved_ticks: 0,
 			retries: 0,
+			stats: PlayStats::default(),
 			pipe_fallback: false,
 			talking: false,
 		});
@@ -721,6 +738,17 @@ impl Player {
 	/// modes). `skipped` = explicit user action.
 	async fn finish_current(&mut self, skipped: bool) {
 		let Some(c) = self.current.take() else { return };
+		let s = &c.stats;
+		info!(
+			title = %c.item.track.title,
+			frames = c.frames_played,
+			dropped = s.dropped,
+			stalls = s.stalls,
+			stall_ms = s.stall_ticks * 20,
+			late_ticks = s.late_ticks,
+			max_late_ms = s.max_late_ms,
+			"track stats"
+		);
 		if let Some(d) = c.decoder {
 			d.kill().await;
 		}
@@ -739,7 +767,8 @@ impl Player {
 
 	// ------------------------------------------------------------------ tick
 
-	async fn on_tick(&mut self) {
+	/// `late`: how far behind schedule this tick fired.
+	async fn on_tick(&mut self, late: Duration) {
 		let mut finished = false;
 		let mut retry: Option<(f64, bool)> = None; // (position, use_pipe)
 		let mut skip_to: Option<f64> = None;
@@ -757,6 +786,10 @@ impl Player {
 						}
 					}
 					if c.prebuffered {
+						if late > LATE_TICK {
+							c.stats.late_ticks += 1;
+							c.stats.max_late_ms = c.stats.max_late_ms.max(late.as_millis() as u64);
+						}
 						match dec.pull() {
 							Pull::Frame(mut pcm) => {
 								c.frames_played += 1;
@@ -766,6 +799,8 @@ impl Player {
 									Ok(len) => {
 										if self.audio_tx.try_send(AudioOut::Frame(self.opus_buf[..len].to_vec())).is_ok() {
 											c.talking = true;
+										} else {
+											c.stats.dropped += 1;
 										}
 									}
 									Err(e) => warn!(error = %e, "opus encode failed"),
@@ -777,6 +812,10 @@ impl Player {
 								}
 							}
 							Pull::Starved => {
+								if c.starved_ticks == 0 {
+									c.stats.stalls += 1;
+								}
+								c.stats.stall_ticks += 1;
 								c.starved_ticks += 1;
 								if c.starved_ticks == 150 {
 									warn!(title = %c.item.track.title, "audio starved for 3 s");
