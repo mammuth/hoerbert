@@ -1,0 +1,21 @@
+# Production stack on hetzner1 (/root/hoerbert). Image is built by
+# .github/workflows/deploy.yml; Caddy on the host proxies hörbert.max-muth.de → 127.0.0.1:8080.
+services:
+  hoerbert:
+    image: ghcr.io/mammuth/hoerbert:latest
+    container_name: hoerbert
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    depends_on:
+      - bgutil
+
+  # PO-token provider: datacenter IPs get "Sign in to confirm you're not a bot" from YouTube.
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: hoerbert-bgutil
+    restart: unless-stopped
+    init: true

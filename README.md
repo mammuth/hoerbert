@@ -105,6 +105,16 @@ docker run -d --name ts3 -e TS3SERVER_LICENSE=accept -p 9987:9987/udp teamspeak:
 docker run -d --name ts6 -e TSSERVER_LICENSE_ACCEPTED=accept -p 9987:9987/udp teamspeaksystems/teamspeak6-server
 ```
 
+## Deployment
+
+Push to `main` → `.github/workflows/deploy.yml` builds `ghcr.io/mammuth/hoerbert:latest` and SSHes
+into `hetzner1.max-muth.de`. The `VPS_SSH_KEY` deploy key is restricted to `/root/hoerbert/deploy.sh`
+(pull + restart). Server files: `/root/hoerbert/{compose.yml,deploy.sh,.env,data/}`, copied from
+`deploy/`. Host Caddy proxies `hörbert.max-muth.de` → `127.0.0.1:8080`.
+
+Rollback: set `image: ghcr.io/mammuth/hoerbert:sha-<commit>` in `/root/hoerbert/compose.yml`, then
+`docker compose up -d`.
+
 ## License
 
 MIT
