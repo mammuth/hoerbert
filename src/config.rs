@@ -25,6 +25,16 @@ pub struct Config {
 	pub help_suffix: Option<String>,
 	pub soundboard_file: PathBuf,
 	pub soundboard_volume: f32,
+	pub voice: bool,
+	/// Wake word: `hoerbert` or `siri`.
+	pub voice_wake: String,
+	pub voice_model_dir: PathBuf,
+	pub voice_whisper_model: String,
+	pub voice_language: String,
+	/// Whisper model that listens for the wake word on everything.
+	pub voice_gate_model: String,
+	/// Dump this speaker's voice to `$DATA_DIR/voice-debug` for tuning.
+	pub voice_debug_user: Option<String>,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -56,6 +66,13 @@ impl Config {
 			public_url: env("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string()),
 			soundboard_file: env("SOUNDBOARD_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("sounds.json")),
 			soundboard_volume: env("SOUNDBOARD_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(2.5),
+			voice: env("VOICE").map(|v| v == "true" || v == "1").unwrap_or(false),
+			voice_wake: env("VOICE_WAKE").map(|v| v.to_lowercase()).unwrap_or_else(|| "hoerbert".into()),
+			voice_model_dir: env("VOICE_MODEL_DIR").map(PathBuf::from).unwrap_or_else(|| data_dir.join("models")),
+			voice_whisper_model: env("VOICE_WHISPER_MODEL").unwrap_or_else(|| "small".into()),
+			voice_language: env("VOICE_LANGUAGE").unwrap_or_default(),
+			voice_gate_model: env("VOICE_GATE_MODEL").unwrap_or_else(|| "base".into()),
+			voice_debug_user: env("VOICE_DEBUG_USER"),
 			data_dir,
 			ytdlp_bin: env("YTDLP_BIN").unwrap_or_else(|| "yt-dlp".into()),
 			ffmpeg_bin: env("FFMPEG_BIN").unwrap_or_else(|| "ffmpeg".into()),

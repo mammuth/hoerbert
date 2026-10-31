@@ -8,6 +8,7 @@ mod soundboard;
 mod sponsorblock;
 mod store;
 mod ts;
+mod voice;
 mod web;
 
 use anyhow::{Context, Result};
@@ -35,12 +36,25 @@ async fn main() -> Result<()> {
 
 	let player = player::spawn(cfg.clone(), store, resolver.clone(), audio_tx, ts_cmd_tx.clone())?;
 
+	let voice_tx = if cfg.voice {
+		match voice::spawn(&cfg, ts_event_tx.clone()) {
+			Ok(tx) => Some(tx),
+			Err(e) => {
+				tracing::error!(error = %format!("{e:#}"), "voice commands disabled");
+				None
+			}
+		}
+	} else {
+		None
+	};
+
 	let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 	let (ts_done_tx, mut ts_done_rx) = mpsc::channel(1);
 	ts::spawn(cfg.clone(), ts::TsChannels {
 		audio_rx,
 		cmd_rx: ts_cmd_rx,
 		event_tx: ts_event_tx,
+		voice_tx,
 		shutdown: shutdown_rx,
 		done_tx: ts_done_tx,
 	});

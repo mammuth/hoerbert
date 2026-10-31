@@ -45,6 +45,13 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `YTDLP_ARGS` | — | extra yt-dlp args (cookies, player clients, PO token provider) |
 | `YTDLP_AUTO_UPDATE` | `true` | `pip install -U yt-dlp` on container start |
 | `DATA_DIR` | `data` | state + identity |
+| `VOICE` | `false` | spoken commands, see below |
+| `VOICE_WAKE` | `hoerbert` | wake word: `hoerbert` or `siri` |
+| `VOICE_GATE_MODEL` | `base` | Whisper that listens for the wake word: `tiny`, `base` |
+| `VOICE_WHISPER_MODEL` | `small` | Whisper for the command / song title: `base`, `small` |
+| `VOICE_LANGUAGE` | auto | Whisper language (`de`, `en`, …) |
+| `VOICE_DEBUG_USER` | — | save this speaker's utterances to `$DATA_DIR/voice-debug` for tuning |
+| `VOICE_MODEL_DIR` | `$DATA_DIR/models` | where the models are downloaded to |
 | `RUST_LOG` | `info,hoerbert=debug` | log filter |
 
 The web UI has no login. Run it on your LAN or behind a reverse proxy with
@@ -59,6 +66,26 @@ auth if the port is reachable from the internet.
 !now  !queue  !clear
 !soundboard              list sounds, play one with !<slug>
 ```
+
+### Voice commands (experimental)
+
+With `VOICE=true` Hörbert listens in its channel:
+
+```
+Hörbert play <song>      search + queue   (also: spiel <song>)
+Hörbert skip / next      (nächster, weiter)
+Hörbert pause / stop
+Hörbert resume / continue
+Hörbert … beep … <command>   say the command after the beep
+```
+
+The server only sends voice while somebody talks, so this costs nothing when
+the channel is quiet. Each utterance goes through Whisper `base` (~10 % of a
+core while people talk), which only looks for the wake word near the start;
+commands are transcribed again with Whisper `small` (~0.7 s) for an accurate
+title. ~700 MB RAM. Audio is never stored. Recognised commands are echoed in
+the channel chat (`🎙 Max: play …`). The container downloads the models
+(~450 MB) into `/data/models` on first start.
 
 ### Soundboard
 
@@ -106,7 +133,7 @@ web UI ──HTTP/WS──▶ axum ──▶ Player actor ──20 ms Opus frame
 ## Development
 
 ```bash
-# backend (needs ffmpeg, yt-dlp, libopus-dev, pkg-config, cmake on PATH)
+# backend (needs ffmpeg, yt-dlp, libopus-dev, pkg-config, cmake, libclang on PATH)
 TS_ADDRESS=127.0.0.1 cargo run
 # frontend with hot reload, proxied to :8080
 cd web && npm install && npm run dev

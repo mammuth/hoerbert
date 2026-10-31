@@ -11,11 +11,12 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use tsclientlib::events::Event;
 use tsclientlib::prelude::*;
-use tsclientlib::{ChannelId, Connection, Identity, Invoker, MessageTarget, StreamItem};
+use tsclientlib::{ChannelId, ClientId, Connection, Identity, Invoker, MessageTarget, StreamItem};
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 use crate::config::Config;
 use crate::model::TsStatus;
+use crate::voice::VoicePacket;
 
 pub enum AudioOut {
 	/// One 20 ms Opus frame.
@@ -31,12 +32,18 @@ pub enum TsCmd {
 pub enum TsEvent {
 	Status(TsStatus),
 	Message { target: MessageTarget, invoker: Invoker, text: String },
+	/// Spoken command (see `voice.rs`), without prefix.
+	Voice { from: u16, name: String, text: String },
+	/// Bare wake word heard (beep), waiting for the command.
+	VoiceListening { name: String },
 }
 
 pub struct TsChannels {
 	pub audio_rx: mpsc::Receiver<AudioOut>,
 	pub cmd_rx: mpsc::Receiver<TsCmd>,
 	pub event_tx: mpsc::Sender<TsEvent>,
+	/// Incoming voice for spoken commands (`None` = disabled).
+	pub voice_tx: Option<std::sync::mpsc::SyncSender<VoicePacket>>,
 	/// Flipped to `true` on shutdown: disconnect cleanly so the server frees
 	/// our slot immediately (otherwise a restart hits ClientTooManyClonesConnected
 	/// until the ghost client times out).
@@ -245,6 +252,13 @@ async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
 					Some(Ok(StreamItem::DisconnectedTemporarily(reason))) => {
 						warn!(?reason, "temporarily disconnected, library is reconnecting");
 						send_status(&con, false);
+					}
+					Some(Ok(StreamItem::Audio(packet))) => {
+						let Some(tx) = &chans.voice_tx else { continue };
+						let AudioData::S2C { from, codec: CodecType::OpusVoice | CodecType::OpusMusic, data, .. } = packet.data().data() else { continue };
+						let name = con.get_state().ok().and_then(|b| b.clients.get(&ClientId(*from)).map(|c| c.name.clone())).unwrap_or_default();
+						// Full = voice thread busy transcribing; dropping beats stalling TeamSpeak.
+						let _ = tx.try_send(VoicePacket { from: *from, name, opus: data.to_vec() });
 					}
 					Some(Ok(StreamItem::AudioChange(ev))) => {
 						debug!(?ev, "audio state changed");

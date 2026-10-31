@@ -6,6 +6,8 @@
 //!
 //! If a chat message is given it is sent to the channel after connecting and
 //! any replies are printed (for testing `!play …` style commands).
+//! With `SPEAK=clip.f32` (raw 16 kHz mono f32le) the clip is sent as voice,
+//! for testing spoken commands.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -45,6 +47,27 @@ async fn main() -> Result<()> {
 		let cmd = con.get_state()?.send_message(tsclientlib::MessageTarget::Channel, msg);
 		cmd.send(&mut con)?;
 		println!("sent chat: {msg}");
+	}
+	if let Ok(path) = std::env::var("SPEAK") {
+		use audiopus::coder::Encoder;
+		use audiopus::{Application, Channels, SampleRate};
+		use tsproto_packets::packets::{CodecType, OutAudio};
+		let bytes = std::fs::read(&path)?;
+		let samples: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+		let enc = Encoder::new(SampleRate::Hz16000, Channels::Mono, Application::Voip)?;
+		let mut buf = vec![0u8; 1275];
+		let mut next = tokio::time::Instant::now();
+		for (i, frame) in samples.chunks(320).enumerate() {
+			let mut frame = frame.to_vec();
+			frame.resize(320, 0.0);
+			let n = enc.encode_float(&frame, &mut buf)?;
+			// Keep polling the connection while pacing, it drives the network IO.
+			next += Duration::from_millis(20);
+			while let Ok(Some(_)) = tokio::time::timeout_at(next, con.events().next()).await {}
+			con.send_audio(OutAudio::new(&AudioData::C2S { id: i as u16, codec: CodecType::OpusVoice, data: &buf[..n] }))?;
+		}
+		con.send_audio(OutAudio::new(&AudioData::C2S { id: 0, codec: CodecType::OpusVoice, data: &[] }))?;
+		println!("spoke {path}");
 	}
 	let mut counts: HashMap<u16, (u64, u64, String)> = HashMap::new(); // from -> (packets, bytes, codec)
 	let deadline = Instant::now() + Duration::from_secs(secs);

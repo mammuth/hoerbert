@@ -2,7 +2,7 @@
 
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-use tsclientlib::{Invoker, MessageTarget};
+use tsclientlib::{ClientId, Invoker, MessageTarget};
 
 use crate::config::Config;
 use crate::model::{fmt_duration, PlaybackStatus};
@@ -32,6 +32,25 @@ pub async fn run(ctx: ChatContext, mut events: mpsc::Receiver<TsEvent>) {
 				if let Some(reply) = handle(&ctx, &invoker, &text).await {
 					let _ = ctx.ts_tx.send(TsCmd::SendMessage { target: reply_target, text: reply }).await;
 				}
+			}
+			TsEvent::VoiceListening { name } => {
+				info!(user = %name, "listening for a command");
+				let url = crate::voice::beep_path(&ctx.cfg).to_string_lossy().into_owned();
+				ctx.player.send(Cmd::PlaySound { url, volume: 1.0 }).await;
+			}
+			TsEvent::Voice { from, name, text } => {
+				// `pause`/`resume` toggle in chat; spoken ones should only do what they say.
+				let paused = ctx.player.snapshot().playback.status == PlaybackStatus::Paused;
+				if (text == "pause" && paused) || (text == "resume" && !paused) {
+					continue;
+				}
+				let invoker = Invoker { name: name.clone(), id: ClientId(from), uid: None };
+				let reply = handle(&ctx, &invoker, &format!("{}{text}", ctx.cfg.command_prefix)).await;
+				let msg = match reply {
+					Some(r) => format!("🎙 {name}: {text}\n{r}"),
+					None => format!("🎙 {name}: {text}"),
+				};
+				let _ = ctx.ts_tx.send(TsCmd::SendMessage { target: MessageTarget::Channel, text: msg }).await;
 			}
 		}
 	}
