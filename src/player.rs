@@ -372,13 +372,19 @@ impl Player {
 			}
 			Cmd::TsStatus(s) => {
 				let listening = s.listeners > 0;
+				// Moved to another channel; a fresh (re)connect has no previous channel.
+				let moved = self.ts_status.channel.is_some() && s.channel.is_some() && self.ts_status.channel != s.channel;
 				self.ts_status = s;
 				if !listening {
 					self.empty_since.get_or_insert_with(Instant::now);
 				} else {
 					self.empty_since = None;
-					if self.auto_paused {
-						info!("listeners are back, resuming");
+					let paused = self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Paused);
+					if moved && self.current.is_none() && !self.queue.is_empty() {
+						info!("moved to listeners, starting queue");
+						self.start_next().await;
+					} else if self.auto_paused || (moved && paused) {
+						info!(moved, "listeners are here, resuming");
 						self.set_paused(false);
 					}
 				}
