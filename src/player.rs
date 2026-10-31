@@ -174,6 +174,9 @@ pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Send
 	let persisted = store.load();
 	let mut encoder = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)?;
 	encoder.set_bitrate(Bitrate::BitsPerSecond(cfg.opus_bitrate))?;
+	// Some loss on the uplink is expected; trade a little bitrate for robustness.
+	encoder.set_inband_fec(true)?;
+	encoder.set_packet_loss_perc(5)?;
 	let ts_status = TsStatus { connected: false, server: cfg.ts_address.clone(), channel: None, listeners: 0, error: None };
 	let (cmd_tx, cmd_rx) = mpsc::channel(64);
 	let (load_tx, load_rx) = mpsc::channel(8);
