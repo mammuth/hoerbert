@@ -94,6 +94,8 @@ struct Current {
 /// Per-track playback health, logged when the track ends.
 #[derive(Default)]
 struct PlayStats {
+	/// Frames sent, across seeks and retries (unlike `frames_played`).
+	frames: u64,
 	/// Frames the TeamSpeak thread could not take (silently lost audio).
 	dropped: u32,
 	/// Decoder underruns after prebuffering, and their total length.
@@ -688,7 +690,7 @@ impl Player {
 		let s = &c.stats;
 		info!(
 			title = %c.item.track.title,
-			frames = c.frames_played,
+			frames = s.frames,
 			dropped = s.dropped,
 			stalls = s.stalls,
 			stall_ms = s.stall_ticks * 20,
@@ -743,6 +745,7 @@ impl Player {
 						match dec.pull() {
 							Pull::Frame(pcm) => {
 								c.frames_played += 1;
+								c.stats.frames += 1;
 								c.starved_ticks = 0;
 								music = Some(pcm);
 								let pos = c.position();
