@@ -44,10 +44,12 @@
       <AddBar />
       <Queue />
     </div>
-    <aside class="col side card rise" id="side" style="animation-delay: 180ms">
+    <aside class="col side" id="side">
       <Soundboard />
-      <h3 class="side-title"><Icon name="history" size={16} /> History</h3>
-      <History />
+      <section class="card history rise" style="animation-delay: 240ms">
+        <h3 class="side-title"><Icon name="history" size={16} /> History</h3>
+        <History />
+      </section>
     </aside>
   </main>
 
@@ -81,7 +83,8 @@
 
   main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 18px; align-items: start; }
   .col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-  .side { padding: 14px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
+  .side { position: sticky; top: 16px; max-height: calc(100vh - 32px); }
+  .history { padding: 14px; min-height: 0; overflow: auto; }
   .side-title { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 700; font-size: 15px; padding: 6px 10px 16px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
   footer { font-size: 12px; text-align: center; margin-top: auto; }
 

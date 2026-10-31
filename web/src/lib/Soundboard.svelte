@@ -24,7 +24,7 @@
 </script>
 
 {#if sounds.length}
-  <section>
+  <section class="card sb rise" style="animation-delay: 180ms">
     <h3 class="side-title"><Icon name="volume" size={16} /> Soundboard</h3>
     <div class="pads">
       {#each sounds as s (s.slug)}
@@ -45,7 +45,8 @@
 
 <style>
   .side-title { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 700; font-size: 15px; padding: 6px 10px 16px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
-  .pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .sb { padding: 14px; flex-shrink: 0; }
+  .pads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .pad {
     flex-direction: column; justify-content: center; gap: 6px; padding: 12px 6px 10px; min-width: 0;
     border-radius: var(--radius-sm);
