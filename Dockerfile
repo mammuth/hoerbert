@@ -11,10 +11,13 @@ FROM rust:1-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends libopus-dev pkg-config cmake libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
+# Dependencies only (stub main): this layer stays cached until Cargo.* change.
+RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release --locked && rm -rf src
 COPY src ./src
 COPY examples ./examples
 COPY --from=web /web/dist ./web/dist
-RUN cargo build --release --locked && strip target/release/hoerbert
+# touch: the stub binary is newer than the checked-out sources
+RUN touch src/main.rs && cargo build --release --locked && strip target/release/hoerbert
 
 # ---------- runtime ----------
 FROM debian:bookworm-slim
