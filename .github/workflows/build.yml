@@ -1,4 +1,4 @@
-name: deploy
+name: build
 
 on:
   push:
@@ -34,19 +34,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      packages: read
-    steps:
-      - name: Pull & restart on hetzner1
-        env:
-          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          install -m 700 -d ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
-          echo "hetzner1.max-muth.de ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMX9QeozQFQ1nqy/8TL6KPq/5TXnT9qte5LtW0G61wgf" > ~/.ssh/known_hosts
-          # Key is restricted to /root/hoerbert/deploy.sh on the server; token goes via stdin.
-          echo "$GHCR_TOKEN" | ssh root@hetzner1.max-muth.de
