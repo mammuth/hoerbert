@@ -162,7 +162,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 		// Built-in commands above win over sounds with the same slug.
 		slug => {
 			let sound = ctx.soundboard.get(slug)?;
-			ctx.player.send(Cmd::PlaySound(sound.url)).await;
+			ctx.player.send(Cmd::PlaySound { url: sound.url, volume: sound.volume }).await;
 			None
 		}
 	}

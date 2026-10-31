@@ -249,6 +249,6 @@ async fn sounds(State(s): State<AppState>) -> Response {
 }
 async fn sound_play(State(s): State<AppState>, Path(slug): Path<String>) -> ApiResult {
 	let sound = s.soundboard.get(&slug.to_ascii_lowercase()).ok_or_else(not_found)?;
-	s.player.send(Cmd::PlaySound(sound.url)).await;
+	s.player.send(Cmd::PlaySound { url: sound.url, volume: sound.volume }).await;
 	ok()
 }

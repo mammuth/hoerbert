@@ -47,7 +47,7 @@ pub enum Cmd {
 	Clear,
 	TsStatus(TsStatus),
 	/// Soundboard clip (ffmpeg input), mixed over the music.
-	PlaySound(String),
+	PlaySound { url: String, volume: f32 },
 }
 
 #[derive(Clone)]
@@ -121,6 +121,8 @@ pub struct Player {
 	current: Option<Current>,
 	/// Soundboard clip currently playing.
 	sfx: Option<Decoder>,
+	/// Gain of `sfx` relative to the music.
+	sfx_gain: f32,
 	volume: f32,
 	ts_status: TsStatus,
 	last_error: Option<String>,
@@ -172,6 +174,7 @@ pub fn spawn(
 		http: reqwest::Client::builder().user_agent("hoerbert/0.1").build()?,
 		current: None,
 		sfx: None,
+		sfx_gain: 1.0,
 		ts_status,
 		last_error: None,
 		resolve_failures: 0,
@@ -384,14 +387,17 @@ impl Player {
 				self.queue.clear();
 				self.dirty = true;
 			}
-			Cmd::PlaySound(url) => {
+			Cmd::PlaySound { url, volume } => {
 				// A new clip replaces the one still playing.
 				if let Some(d) = self.sfx.take() {
 					tokio::spawn(d.kill());
 				}
 				let stream = StreamInfo { url, headers: HashMap::new(), is_live: false, duration: None, direct: true, available_at: None };
 				match Decoder::spawn_url(&self.cfg, &stream, 0.0) {
-					Ok(d) => self.sfx = Some(d),
+					Ok(d) => {
+						self.sfx = Some(d);
+						self.sfx_gain = self.cfg.soundboard_volume * volume;
+					}
 					Err(e) => warn!(error = %e, url = %stream.url, "could not start sound"),
 				}
 			}
@@ -790,17 +796,16 @@ impl Player {
 		}
 
 		let has_music = music.is_some();
-		let frame = match (music, self.pull_sfx()) {
-			(Some(mut m), Some(s)) => {
-				for (a, b) in m.iter_mut().zip(&s) {
-					*a = a.saturating_add(*b);
-				}
-				Some(m)
-			}
-			(m, s) => m.or(s),
-		};
-		if let Some(mut pcm) = frame {
-			apply_gain(&mut pcm, self.volume);
+		let sfx = self.pull_sfx();
+		if has_music || sfx.is_some() {
+			// Mix in f32 so a boosted clip only clips after the master volume.
+			let pcm: Frame = (0..FRAME_LEN)
+				.map(|i| {
+					let m = music.as_ref().map_or(0.0, |f| f[i] as f32);
+					let s = sfx.as_ref().map_or(0.0, |f| f[i] as f32 * self.sfx_gain);
+					((m + s) * self.volume).clamp(i16::MIN as f32, i16::MAX as f32) as i16
+				})
+				.collect();
 			match self.encoder.encode(&pcm[..FRAME_LEN], &mut self.opus_buf) {
 				Ok(len) => {
 					let sent = self.audio_tx.try_send(AudioOut::Frame(self.opus_buf[..len].to_vec())).is_ok();
@@ -891,11 +896,3 @@ impl Player {
 	}
 }
 
-fn apply_gain(pcm: &mut [i16], gain: f32) {
-	if (gain - 1.0).abs() < 0.001 {
-		return;
-	}
-	for s in pcm.iter_mut() {
-		*s = (*s as f32 * gain).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
-	}
-}

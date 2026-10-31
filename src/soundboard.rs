@@ -2,11 +2,11 @@
 //! or the web UI and mixed over whatever is playing.
 //!
 //! ```json
-//! [{ "slug": "airhorn", "name": "Airhorn", "emoji": "📯", "url": "sounds/airhorn.mp3" }]
+//! [{ "slug": "airhorn", "name": "Airhorn", "emoji": "📯", "url": "sounds/airhorn.mp3", "volume": 0.8 }]
 //! ```
 //! `url` is anything ffmpeg can read; relative paths resolve against the
-//! file's directory. The file is re-read on every lookup, so edits apply
-//! without a restart.
+//! file's directory. `volume` (default 1.0) evens out loud and quiet clips.
+//! The file is re-read on every lookup, so edits apply without a restart.
 
 use std::path::{Path, PathBuf};
 
@@ -22,7 +22,11 @@ pub struct Sound {
 	/// Not exposed to the web UI (may be a local path).
 	#[serde(skip_serializing)]
 	pub url: String,
+	#[serde(default = "default_volume", skip_serializing)]
+	pub volume: f32,
 }
+
+fn default_volume() -> f32 { 1.0 }
 
 #[derive(Clone)]
 pub struct Soundboard {
