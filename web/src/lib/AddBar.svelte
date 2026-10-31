@@ -45,7 +45,7 @@
 
   async function addTrack(t: Track, opts: { next?: boolean; play_now?: boolean } = {}) {
     const r = await store.runAs((who) => api.add({ track: t, requested_by: who, ...opts }))
-    if (r) store.toast(`Queued: ${t.title}`)
+    if (r) { store.toast(`Queued: ${t.title}`); open = false }
   }
 
   function onKey(e: KeyboardEvent) {
