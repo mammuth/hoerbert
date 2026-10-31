@@ -28,6 +28,8 @@ const LATE_TICK: Duration = Duration::from_millis(10);
 const PREBUFFER_FRAMES: usize = 25; // 0.5 s before we start talking
 const STREAM_CACHE_TTL: Duration = Duration::from_secs(45 * 60);
 const MAX_RETRIES: u8 = 2;
+/// Pause once nobody has been listening in our channel for this long.
+const EMPTY_CHANNEL_GRACE: Duration = Duration::from_secs(60);
 
 pub enum Cmd {
 	Add { tracks: Vec<Track>, requested_by: Option<String>, next: bool, play_now: bool },
@@ -119,6 +121,10 @@ pub struct Player {
 	last_error: Option<String>,
 	/// Consecutive tracks whose stream could not be resolved.
 	resolve_failures: u32,
+	/// Since when nobody is listening in our channel (`None`: someone is).
+	empty_since: Option<Instant>,
+	/// Paused because the channel emptied; resumes once someone listens again.
+	auto_paused: bool,
 	version: u64,
 	gen_counter: u64,
 	state_tx: watch::Sender<Arc<StateSnapshot>>,
@@ -156,6 +162,8 @@ pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Send
 		ts_status,
 		last_error: None,
 		resolve_failures: 0,
+		empty_since: Some(Instant::now()),
+		auto_paused: false,
 		version: 0,
 		gen_counter: 0,
 		state_tx: watch::channel(Arc::new(empty_snapshot())).0,
@@ -196,10 +204,7 @@ impl Player {
 	async fn run(mut self, mut cmd_rx: mpsc::Receiver<Cmd>, mut load_rx: mpsc::Receiver<LoadResult>) {
 		let mut tick = tokio::time::interval(Duration::from_millis(20));
 		tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
-		// Resume where we left off: if the queue has items, start playing.
-		if self.current.is_none() && !self.queue.is_empty() {
-			self.start_next().await;
-		}
+		// Start idle: the restored queue waits for an explicit play.
 		self.publish();
 		loop {
 			tokio::select! {
@@ -273,6 +278,10 @@ impl Player {
 	// ---------------------------------------------------------------- commands
 
 	async fn handle(&mut self, cmd: Cmd) {
+		// Someone is using the bot: give them a fresh grace period before auto-pause.
+		if !matches!(cmd, Cmd::TsStatus(_)) && self.empty_since.is_some() {
+			self.empty_since = Some(Instant::now());
+		}
 		match cmd {
 			Cmd::Add { tracks, requested_by, next, play_now } => {
 				// A single track is a request; playlists/mixes are background
@@ -362,12 +371,24 @@ impl Player {
 				self.dirty = true;
 			}
 			Cmd::TsStatus(s) => {
+				let listening = s.listeners > 0;
 				self.ts_status = s;
+				if !listening {
+					self.empty_since.get_or_insert_with(Instant::now);
+				} else {
+					self.empty_since = None;
+					if self.auto_paused {
+						info!("listeners are back, resuming");
+						self.set_paused(false);
+					}
+				}
 			}
 		}
 	}
 
 	fn set_paused(&mut self, paused: bool) {
+		self.auto_paused = false;
+		let mut reload = None;
 		if let Some(c) = &mut self.current {
 			if paused && c.status == PlaybackStatus::Playing {
 				c.status = PlaybackStatus::Paused;
@@ -376,8 +397,35 @@ impl Player {
 					c.talking = false;
 				}
 			} else if !paused && c.status == PlaybackStatus::Paused {
-				c.status = PlaybackStatus::Playing;
+				if c.decoder.is_some() {
+					c.status = PlaybackStatus::Playing;
+				} else {
+					// Auto-pause dropped the decoder: re-resolve (the URL may have
+					// expired meanwhile) and continue from `base_pos`.
+					c.status = PlaybackStatus::Loading;
+					reload = Some((c.gen, c.item.track.clone()));
+				}
 			}
+		}
+		if let Some((gen, track)) = reload {
+			self.spawn_load(gen, track, 0.0);
+		}
+	}
+
+	/// Nobody is listening: pause and free the stream so we don't keep
+	/// streaming into an empty channel. Resumes once listeners are back.
+	async fn auto_pause(&mut self) {
+		let Some(c) = &mut self.current else { return };
+		info!(title = %c.item.track.title, "channel empty, pausing");
+		c.base_pos = c.position();
+		c.frames_played = 0;
+		c.prebuffered = false;
+		c.starved_ticks = 0;
+		let decoder = c.decoder.take();
+		self.set_paused(true);
+		self.auto_paused = true;
+		if let Some(d) = decoder {
+			d.kill().await;
 		}
 	}
 
@@ -617,6 +665,13 @@ impl Player {
 		let mut retry: Option<(f64, bool)> = None; // (position, use_pipe)
 		let mut skip_to: Option<f64> = None;
 		let mut publish = false;
+
+		if self.empty_since.is_some_and(|t| t.elapsed() > EMPTY_CHANNEL_GRACE)
+			&& self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Playing)
+		{
+			self.auto_pause().await;
+			publish = true;
+		}
 
 		if let Some(c) = &mut self.current {
 			if c.status == PlaybackStatus::Playing {
