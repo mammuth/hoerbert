@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
 	let (ts_cmd_tx, ts_cmd_rx) = mpsc::channel(32);
 	let (ts_event_tx, ts_event_rx) = mpsc::channel(64);
 
-	let player = player::spawn(cfg.clone(), store, resolver.clone(), audio_tx)?;
+	let player = player::spawn(cfg.clone(), store, resolver.clone(), audio_tx, ts_cmd_tx.clone())?;
 
 	let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 	let (ts_done_tx, mut ts_done_rx) = mpsc::channel(1);

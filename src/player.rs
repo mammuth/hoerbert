@@ -10,6 +10,7 @@ use audiopus::coder::Encoder;
 use audiopus::{Application, Bitrate, Channels, SampleRate};
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
+use tsclientlib::MessageTarget;
 use uuid::Uuid;
 
 use crate::audio::{Decoder, Pull, FRAME_LEN};
@@ -18,7 +19,7 @@ use crate::model::*;
 use crate::resolver::{Resolver, StreamInfo};
 use crate::sponsorblock;
 use crate::store::{Persisted, Store};
-use crate::ts::AudioOut;
+use crate::ts::{AudioOut, TsCmd};
 
 const HISTORY_MAX: usize = 50;
 /// Stop instead of skipping after this many unresolvable tracks in a row.
@@ -129,6 +130,7 @@ pub struct Player {
 	gen_counter: u64,
 	state_tx: watch::Sender<Arc<StateSnapshot>>,
 	audio_tx: mpsc::Sender<AudioOut>,
+	ts_tx: mpsc::Sender<TsCmd>,
 	encoder: Encoder,
 	opus_buf: Vec<u8>,
 	load_tx: mpsc::Sender<LoadResult>,
@@ -140,7 +142,13 @@ pub struct Player {
 	last_publish: Instant,
 }
 
-pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Sender<AudioOut>) -> Result<PlayerHandle> {
+pub fn spawn(
+	cfg: Config,
+	store: Store,
+	resolver: Resolver,
+	audio_tx: mpsc::Sender<AudioOut>,
+	ts_tx: mpsc::Sender<TsCmd>,
+) -> Result<PlayerHandle> {
 	let persisted = store.load();
 	let mut encoder = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)?;
 	encoder.set_bitrate(Bitrate::BitsPerSecond(cfg.opus_bitrate))?;
@@ -168,6 +176,7 @@ pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Send
 		gen_counter: 0,
 		state_tx: watch::channel(Arc::new(empty_snapshot())).0,
 		audio_tx,
+		ts_tx,
 		encoder,
 		opus_buf: vec![0u8; 4000],
 		load_tx,
@@ -383,9 +392,15 @@ impl Player {
 					if moved && self.current.is_none() && !self.queue.is_empty() {
 						info!("moved to listeners, starting queue");
 						self.start_next().await;
+						if let Some(c) = &self.current {
+							self.announce(format!("Starting the queue: {}", c.item.track.title));
+						}
 					} else if self.auto_paused || (moved && paused) {
 						info!(moved, "listeners are here, resuming");
 						self.set_paused(false);
+						if let Some(c) = &self.current {
+							self.announce(format!("Resuming: {}", c.item.track.title));
+						}
 					}
 				}
 			}
@@ -418,11 +433,17 @@ impl Player {
 		}
 	}
 
+	/// Post to our current channel's chat.
+	fn announce(&self, text: String) {
+		let _ = self.ts_tx.try_send(TsCmd::SendMessage { target: MessageTarget::Channel, text });
+	}
+
 	/// Nobody is listening: pause and free the stream so we don't keep
 	/// streaming into an empty channel. Resumes once listeners are back.
 	async fn auto_pause(&mut self) {
 		let Some(c) = &mut self.current else { return };
 		info!(title = %c.item.track.title, "channel empty, pausing");
+		let msg = format!("Nobody listening, pausing: {}", c.item.track.title);
 		c.base_pos = c.position();
 		c.frames_played = 0;
 		c.prebuffered = false;
@@ -430,6 +451,7 @@ impl Player {
 		let decoder = c.decoder.take();
 		self.set_paused(true);
 		self.auto_paused = true;
+		self.announce(msg);
 		if let Some(d) = decoder {
 			d.kill().await;
 		}
