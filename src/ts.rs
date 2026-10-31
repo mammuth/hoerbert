@@ -297,10 +297,12 @@ fn log_network_stats(con: &Connection) {
 	let Ok(s) = con.get_network_stats() else { return };
 	let (rtt_ms, rtt_dev_ms) = (s.rtt.as_millis() as u64, s.rtt_dev.as_millis() as u64);
 	let loss = s.get_packetloss_s2c_keepalive();
-	if loss > 0.01 || rtt_dev_ms > 30 {
-		warn!(rtt_ms, rtt_dev_ms, loss, "network stats: unstable connection");
+	// What tsclientlib reports to the server (shown in the TS client's connection info).
+	let (speech, control, total) = (s.get_packetloss_s2c_speech(), s.get_packetloss_s2c_control(), s.get_packetloss_s2c_total());
+	if loss > 0.01 || total > 0.01 || rtt_dev_ms > 30 {
+		warn!(rtt_ms, rtt_dev_ms, loss, speech, control, total, "network stats: unstable connection");
 	} else {
-		debug!(rtt_ms, rtt_dev_ms, loss, "network stats");
+		debug!(rtt_ms, rtt_dev_ms, loss, speech, control, total, "network stats");
 	}
 }
 
