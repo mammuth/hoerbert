@@ -27,6 +27,22 @@ pub struct StreamInfo {
 	pub duration: Option<f64>,
 	/// Set when the stream is a direct URL that bypassed yt-dlp.
 	pub direct: bool,
+	/// Unix seconds before which YouTube answers the URL with 403.
+	pub available_at: Option<f64>,
+}
+
+impl StreamInfo {
+	/// YouTube URLs only become fetchable a few seconds after extraction
+	/// (yt-dlp: "Sleeping … as required by the site").
+	pub async fn wait_until_available(&self) {
+		let Some(at) = self.available_at else { return };
+		let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs_f64();
+		if at > now {
+			let wait = at - now + 0.3;
+			debug!(wait, "waiting until stream url is available");
+			tokio::time::sleep(Duration::from_secs_f64(wait)).await;
+		}
+	}
 }
 
 #[derive(Clone)]
@@ -268,6 +284,7 @@ impl Resolver {
 				is_live: track.is_live || duration.is_none(),
 				duration,
 				direct: true,
+				available_at: None,
 			});
 		}
 		let mut cmd = self.base_cmd();
@@ -305,7 +322,8 @@ impl Resolver {
 			|| v.get("live_status").and_then(Value::as_str) == Some("is_live");
 		let duration = v.get("duration").and_then(Value::as_f64).filter(|d| *d > 0.0);
 		debug!(format = ?fmt.get("format_id"), acodec = ?fmt.get("acodec"), abr = ?fmt.get("abr"), "selected stream");
-		Ok(StreamInfo { url, headers, is_live, duration, direct: false })
+		let available_at = fmt.get("available_at").or_else(|| v.get("available_at")).and_then(Value::as_f64);
+		Ok(StreamInfo { url, headers, is_live, duration, direct: false, available_at })
 	}
 }
 

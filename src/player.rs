@@ -94,6 +94,8 @@ impl PlayerHandle {
 
 struct LoadResult {
 	gen: u64,
+	/// Track the result belongs to (prefetches are cached under it).
+	url: String,
 	result: Result<(StreamInfo, Vec<Segment>)>,
 }
 
@@ -145,6 +147,8 @@ pub struct Player {
 	opus_buf: Vec<u8>,
 	load_tx: mpsc::Sender<LoadResult>,
 	stream_cache: HashMap<String, (Instant, StreamInfo)>,
+	/// URL of the prefetch currently in flight.
+	prefetching: Option<String>,
 	dirty: bool,
 	last_save: Instant,
 	last_publish: Instant,
@@ -180,6 +184,7 @@ pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Send
 		opus_buf: vec![0u8; 4000],
 		load_tx,
 		stream_cache: HashMap::new(),
+		prefetching: None,
 		dirty: false,
 		last_save: Instant::now(),
 		last_publish: Instant::now(),
@@ -225,6 +230,10 @@ impl Player {
 				_ = tick.tick() => self.on_tick().await,
 				Some(cmd) = cmd_rx.recv() => {
 					self.handle(cmd).await;
+					// The queue head may have changed (request added, moved…).
+					if self.current.is_some() {
+						self.prefetch_next();
+					}
 					self.publish();
 				}
 				Some(res) = load_rx.recv() => {
@@ -608,7 +617,10 @@ impl Player {
 				}
 			};
 			let (stream, segments) = tokio::join!(stream_fut, sb_fut);
-			let _ = tx.send(LoadResult { gen, result: stream.map(|s| (s, segments)) }).await;
+			if let Ok(s) = &stream {
+				s.wait_until_available().await;
+			}
+			let _ = tx.send(LoadResult { gen, url: track.url, result: stream.map(|s| (s, segments)) }).await;
 		});
 	}
 
@@ -616,27 +628,30 @@ impl Player {
 	fn prefetch_next(&mut self) {
 		let Some(next) = self.queue.first() else { return };
 		let track = next.track.clone();
-		if self.cached_stream(&track.url).is_some() || track.source.as_deref() == Some("direct") {
+		if self.cached_stream(&track.url).is_some()
+			|| track.source.as_deref() == Some("direct")
+			|| self.prefetching.as_deref() == Some(track.url.as_str())
+		{
 			return;
 		}
+		self.prefetching = Some(track.url.clone());
 		let resolver = self.resolver.clone();
 		let tx = self.load_tx.clone();
 		tokio::spawn(async move {
-			if let Ok(s) = resolver.stream_info(&track).await {
-				// gen 0 == prefetch result, never matches a live load
-				let _ = tx.send(LoadResult { gen: 0, result: Ok((s, vec![])) }).await;
-			}
+			// gen 0 == prefetch result, never matches a live load
+			let result = resolver.stream_info(&track).await.map(|s| (s, vec![]));
+			let _ = tx.send(LoadResult { gen: 0, url: track.url, result }).await;
 		});
 	}
 
 	async fn on_loaded(&mut self, res: LoadResult) {
 		if res.gen == 0 {
+			if self.prefetching.as_deref() == Some(res.url.as_str()) {
+				self.prefetching = None;
+			}
 			if let Ok((s, _)) = res.result {
-				// Prefetch: cache by matching the queued track URL.
-				if let Some(url) = self.queue.first().map(|i| i.track.url.clone()) {
-					if self.cached_stream(&url).is_none() {
-						self.stream_cache.insert(url, (Instant::now(), s));
-					}
+				if self.cached_stream(&res.url).is_none() {
+					self.stream_cache.insert(res.url, (Instant::now(), s));
 				}
 			}
 			return;
