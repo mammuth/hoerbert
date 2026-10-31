@@ -15,20 +15,6 @@
 
   let scrubbing = $state(false)
   let scrubPos = $state(0)
-  let volumeLocal = $state<number | null>(null)
-  let volTimer: ReturnType<typeof setTimeout> | undefined
-
-  const volume = $derived(volumeLocal ?? pb?.volume ?? 0.1)
-
-  function onVolume(e: Event) {
-    const v = Number((e.target as HTMLInputElement).value) / 100
-    volumeLocal = v
-    clearTimeout(volTimer)
-    volTimer = setTimeout(async () => {
-      await store.run(api.volume(v))
-      setTimeout(() => (volumeLocal = null), 400)
-    }, 120)
-  }
 
   function barPos(e: PointerEvent, el: HTMLElement): number {
     const r = el.getBoundingClientRect()
@@ -52,11 +38,6 @@
     scrubbing = false
     const pos = barPos(e, e.currentTarget as HTMLElement)
     await store.run(api.seek(pos))
-  }
-
-  function cycleLoop() {
-    const next = pb?.loop === 'off' ? 'all' : pb?.loop === 'all' ? 'one' : 'off'
-    store.run(api.loop(next))
   }
 
   const shownPos = $derived(scrubbing ? scrubPos : position)
@@ -130,21 +111,6 @@
       </button>
       <button class="icon ghost" title="skip" onclick={() => store.run(api.player('skip'))}><Icon name="skip" /></button>
       <button class="icon ghost" title="stop" onclick={() => store.run(api.player('stop'))}><Icon name="stop" /></button>
-
-      <div class="spacer"></div>
-
-      <button class="icon ghost" class:active={pb?.loop !== 'off'} title="loop: {pb?.loop}" onclick={cycleLoop}>
-        <Icon name={pb?.loop === 'one' ? 'repeatOne' : 'repeat'} />
-      </button>
-      <button class="icon ghost" class:active={store.snap?.sponsorblock} title="SponsorBlock {store.snap?.sponsorblock ? 'on' : 'off'}" onclick={() => store.run(api.sponsorblock(!store.snap?.sponsorblock))}>
-        <Icon name="shield" />
-      </button>
-
-      <div class="vol">
-        <Icon name={volume === 0 ? 'mute' : 'volume'} />
-        <input type="range" min="0" max="120" value={Math.round(volume * 100)} oninput={onVolume} aria-label="volume" />
-        <span class="mono muted vol-num">{Math.round(volume * 100)}</span>
-      </div>
     </div>
   </div>
 </section>
@@ -181,15 +147,9 @@
 
   .controls { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .big { width: 52px; height: 52px; border-radius: 50%; box-shadow: 0 10px 30px -10px rgba(255, 122, 26, 0.8); }
-  .spacer { flex: 1; }
-  .vol { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-  .vol input { width: 120px; accent-color: var(--accent); }
-  .vol-num { width: 28px; text-align: right; font-size: 12px; }
 
   @media (max-width: 720px) {
     .now { grid-template-columns: 1fr; padding: 22px; gap: 18px; }
     .art { order: -1; }
-    .vol { width: 100%; }
-    .vol input { flex: 1; }
   }
 </style>

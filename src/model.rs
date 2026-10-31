@@ -47,15 +47,6 @@ impl QueueItem {
 	}
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum LoopMode {
-	#[default]
-	Off,
-	One,
-	All,
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PlaybackStatus {
@@ -93,9 +84,6 @@ pub struct Playback {
 	pub position: f64,
 	/// Unix millis at which `position` was sampled. Clients extrapolate.
 	pub position_at: u64,
-	pub volume: f32,
-	#[serde(rename = "loop")]
-	pub loop_mode: LoopMode,
 	pub segments: Vec<Segment>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub error: Option<String>,
@@ -109,7 +97,6 @@ pub struct StateSnapshot {
 	pub playback: Playback,
 	pub queue: Vec<QueueItem>,
 	pub history: Vec<QueueItem>,
-	pub sponsorblock: bool,
 }
 
 pub fn now_ms() -> u64 {

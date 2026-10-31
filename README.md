@@ -2,7 +2,7 @@
 
 A TeamSpeak music bot for your own server: it joins a channel as a normal
 voice client and plays audio for everyone in it. Control it from a shared web
-UI (queue, search, history, volume, seek) or with chat commands in TeamSpeak.
+UI (queue, search, history) or with chat commands in TeamSpeak.
 
 - **Sources:** anything [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports — YouTube (videos, playlists, search), SoundCloud, Bandcamp, … plus direct audio/radio URLs.
 - **No accounts, no ads:** yt-dlp fetches the raw audio stream; YouTube's in-video sponsor segments are skipped with [SponsorBlock](https://sponsor.ajay.app/).
@@ -34,7 +34,7 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `TS_CHANNEL_PASSWORD`, `TS_SERVER_PASSWORD` | — | passwords, if any |
 | `WEB_BIND` | `0.0.0.0:8080` | where the web UI listens |
 | `PUBLIC_URL` | — | URL shown by `!link` / `!help` |
-| `DEFAULT_VOLUME` | `0.1` | 0.0 – 1.5 |
+| `DEFAULT_VOLUME` | `0.1` | playback volume, 0.0 – 1.5 (fixed, no UI control) |
 | `OPUS_BITRATE` | `128000` | Opus encoder bitrate |
 | `SPONSORBLOCK` | `true` | skip SponsorBlock segments on YouTube |
 | `SPONSORBLOCK_CATEGORIES` | `sponsor,selfpromo,interaction,music_offtopic` | which categories to skip |

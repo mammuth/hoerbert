@@ -19,7 +19,6 @@ export interface QueueItem {
 
 export interface Segment { start: number; end: number; category: string }
 
-export type LoopMode = 'off' | 'one' | 'all'
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused'
 
 export interface Playback {
@@ -27,8 +26,6 @@ export interface Playback {
   item?: QueueItem
   position: number
   position_at: number
-  volume: number
-  loop: LoopMode
   segments: Segment[]
   error?: string
 }
@@ -47,5 +44,4 @@ export interface Snapshot {
   playback: Playback
   queue: QueueItem[]
   history: QueueItem[]
-  sponsorblock: boolean
 }

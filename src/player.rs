@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use audiopus::coder::Encoder;
 use audiopus::{Application, Bitrate, Channels, SampleRate};
-use rand::seq::SliceRandom;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -39,14 +38,10 @@ pub enum Cmd {
 	Toggle,
 	Stop,
 	Seek(f64),
-	Volume(f32),
-	SetLoop(LoopMode),
-	SetSponsorBlock(bool),
 	Remove(Uuid),
 	Move { id: Uuid, to: usize },
 	PlayItem(Uuid),
 	Clear,
-	Shuffle,
 	TsStatus(TsStatus),
 }
 
@@ -120,8 +115,6 @@ pub struct Player {
 	history: Vec<QueueItem>,
 	current: Option<Current>,
 	volume: f32,
-	loop_mode: LoopMode,
-	sponsorblock_on: bool,
 	ts_status: TsStatus,
 	last_error: Option<String>,
 	/// Consecutive tracks whose stream could not be resolved.
@@ -152,9 +145,7 @@ pub fn spawn(cfg: Config, store: Store, resolver: Resolver, audio_tx: mpsc::Send
 	let (cmd_tx, cmd_rx) = mpsc::channel(64);
 	let (load_tx, load_rx) = mpsc::channel(8);
 	let mut player = Player {
-		volume: persisted.volume.unwrap_or(cfg.default_volume).clamp(0.0, 1.5),
-		loop_mode: persisted.loop_mode,
-		sponsorblock_on: persisted.sponsorblock.unwrap_or(cfg.sponsorblock),
+		volume: cfg.default_volume.clamp(0.0, 1.5),
 		queue: persisted.queue,
 		history: persisted.history,
 		cfg,
@@ -193,14 +184,11 @@ fn empty_snapshot() -> StateSnapshot {
 			item: None,
 			position: 0.0,
 			position_at: now_ms(),
-			volume: 0.1,
-			loop_mode: LoopMode::Off,
 			segments: vec![],
 			error: None,
 		},
 		queue: vec![],
 		history: vec![],
-		sponsorblock: true,
 	}
 }
 
@@ -239,9 +227,6 @@ impl Player {
 		let data = Persisted {
 			queue: self.queue.clone(),
 			history: self.history.clone(),
-			volume: Some(self.volume),
-			loop_mode: self.loop_mode,
-			sponsorblock: Some(self.sponsorblock_on),
 		};
 		if let Err(e) = self.store.save(&data) {
 			error!(error = %e, "failed to persist state");
@@ -257,8 +242,6 @@ impl Player {
 				item: Some(c.item.clone()),
 				position: c.position(),
 				position_at: now_ms(),
-				volume: self.volume,
-				loop_mode: self.loop_mode,
 				segments: c.segments.clone(),
 				error: self.last_error.clone(),
 			},
@@ -267,8 +250,6 @@ impl Player {
 				item: None,
 				position: 0.0,
 				position_at: now_ms(),
-				volume: self.volume,
-				loop_mode: self.loop_mode,
 				segments: vec![],
 				error: self.last_error.clone(),
 			},
@@ -279,7 +260,6 @@ impl Player {
 			playback,
 			queue: self.queue.clone(),
 			history: self.history.clone(),
-			sponsorblock: self.sponsorblock_on,
 		}
 	}
 
@@ -315,7 +295,7 @@ impl Player {
 				}
 				self.dirty = true;
 				if play_now && self.current.is_some() {
-					self.finish_current(true).await;
+					self.finish_current().await;
 					self.start_next().await;
 				} else if self.current.is_none() {
 					self.start_next().await;
@@ -323,7 +303,7 @@ impl Player {
 			}
 			Cmd::Skip => {
 				if self.current.is_some() {
-					self.finish_current(true).await;
+					self.finish_current().await;
 					self.start_next().await;
 				} else {
 					self.start_next().await;
@@ -357,23 +337,6 @@ impl Player {
 			}
 			Cmd::Stop => self.stop().await,
 			Cmd::Seek(pos) => self.seek(pos),
-			Cmd::Volume(v) => {
-				self.volume = v.clamp(0.0, 1.5);
-				self.dirty = true;
-			}
-			Cmd::SetLoop(m) => {
-				self.loop_mode = m;
-				self.dirty = true;
-			}
-			Cmd::SetSponsorBlock(on) => {
-				self.sponsorblock_on = on;
-				if !on {
-					if let Some(c) = &mut self.current {
-						c.segments.clear();
-					}
-				}
-				self.dirty = true;
-			}
 			Cmd::Remove(id) => {
 				self.queue.retain(|i| i.id != id);
 				self.dirty = true;
@@ -390,18 +353,12 @@ impl Player {
 				if let Some(idx) = self.queue.iter().position(|i| i.id == id) {
 					let item = self.queue.remove(idx);
 					self.queue.insert(0, item);
-					self.finish_current(true).await;
+					self.finish_current().await;
 					self.start_next().await;
 				}
 			}
 			Cmd::Clear => {
 				self.queue.clear();
-				self.dirty = true;
-			}
-			Cmd::Shuffle => {
-				// Requests keep their order; only the background part is shuffled.
-				let at = self.queue.iter().position(|i| !i.request).unwrap_or(self.queue.len());
-				self.queue[at..].shuffle(&mut rand::rng());
 				self.dirty = true;
 			}
 			Cmd::TsStatus(s) => {
@@ -507,7 +464,7 @@ impl Player {
 		let resolver = self.resolver.clone();
 		let http = self.http.clone();
 		let tx = self.load_tx.clone();
-		let sb_on = self.sponsorblock_on;
+		let sb_on = self.cfg.sponsorblock;
 		let cats = self.cfg.sponsorblock_categories.clone();
 		tokio::spawn(async move {
 			let stream_fut = async {
@@ -591,7 +548,7 @@ impl Player {
 					Err(e) => {
 						error!(error = %e, "ffmpeg spawn failed");
 						self.last_error = Some(format!("{e:#}"));
-						self.finish_current(false).await;
+						self.finish_current().await;
 						self.start_next().await;
 					}
 				}
@@ -608,7 +565,7 @@ impl Player {
 					self.stop().await;
 				} else {
 					warn!(error = %e, title = %c.item.track.title, "could not resolve stream, skipping");
-					self.finish_current(false).await;
+					self.finish_current().await;
 					self.start_next().await;
 				}
 			}
@@ -627,9 +584,8 @@ impl Player {
 		let _ = self.audio_tx.try_send(AudioOut::End);
 	}
 
-	/// Move the current item to history (and back onto the queue for loop
-	/// modes). `skipped` = explicit user action.
-	async fn finish_current(&mut self, skipped: bool) {
+	/// Move the current item to history.
+	async fn finish_current(&mut self) {
 		let Some(c) = self.current.take() else { return };
 		let s = &c.stats;
 		info!(
@@ -647,11 +603,6 @@ impl Player {
 		}
 		if c.talking {
 			let _ = self.audio_tx.try_send(AudioOut::End);
-		}
-		match (self.loop_mode, skipped) {
-			(LoopMode::One, false) => self.queue.insert(0, QueueItem { id: Uuid::new_v4(), ..c.item.clone() }),
-			(LoopMode::All, _) => self.queue.push(QueueItem { id: Uuid::new_v4(), ..c.item.clone() }),
-			_ => {}
 		}
 		self.history.insert(0, c.item);
 		self.history.truncate(HISTORY_MAX);
@@ -759,7 +710,7 @@ impl Player {
 		if finished {
 			let title = self.current.as_ref().map(|c| c.item.track.title.clone()).unwrap_or_default();
 			info!(title = %title, "track finished");
-			self.finish_current(false).await;
+			self.finish_current().await;
 			self.start_next().await;
 			publish = true;
 		}
@@ -787,7 +738,7 @@ impl Player {
 				Ok(d) => c.decoder = Some(d),
 				Err(e) => {
 					self.last_error = Some(format!("{e:#}"));
-					self.finish_current(false).await;
+					self.finish_current().await;
 					self.start_next().await;
 				}
 			}

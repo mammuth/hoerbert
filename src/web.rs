@@ -14,7 +14,7 @@ use serde_json::json;
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::model::{LoopMode, Track};
+use crate::model::Track;
 use crate::player::{Cmd, PlayerHandle};
 use crate::resolver::Resolver;
 
@@ -60,11 +60,7 @@ pub fn router(state: AppState) -> Router {
 		.route("/add", post(add))
 		.route("/player/{action}", post(player_action))
 		.route("/player/seek", post(seek))
-		.route("/player/volume", post(volume))
-		.route("/player/loop", post(set_loop))
-		.route("/player/sponsorblock", post(set_sponsorblock))
 		.route("/queue/clear", post(queue_clear))
-		.route("/queue/shuffle", post(queue_shuffle))
 		.route("/queue/{id}/remove", post(queue_remove))
 		.route("/queue/{id}/move", post(queue_move))
 		.route("/queue/{id}/play", post(queue_play));
@@ -219,41 +215,10 @@ async fn seek(State(s): State<AppState>, Json(b): Json<SeekBody>) -> ApiResult {
 	ok()
 }
 
-#[derive(Deserialize)]
-struct VolumeBody {
-	volume: f32,
-}
-async fn volume(State(s): State<AppState>, Json(b): Json<VolumeBody>) -> ApiResult {
-	s.player.send(Cmd::Volume(b.volume)).await;
-	ok()
-}
-
-#[derive(Deserialize)]
-struct LoopBody {
-	mode: LoopMode,
-}
-async fn set_loop(State(s): State<AppState>, Json(b): Json<LoopBody>) -> ApiResult {
-	s.player.send(Cmd::SetLoop(b.mode)).await;
-	ok()
-}
-
-#[derive(Deserialize)]
-struct SbBody {
-	enabled: bool,
-}
-async fn set_sponsorblock(State(s): State<AppState>, Json(b): Json<SbBody>) -> ApiResult {
-	s.player.send(Cmd::SetSponsorBlock(b.enabled)).await;
-	ok()
-}
-
 // ------------------------------------------------------------------- queue
 
 async fn queue_clear(State(s): State<AppState>) -> ApiResult {
 	s.player.send(Cmd::Clear).await;
-	ok()
-}
-async fn queue_shuffle(State(s): State<AppState>) -> ApiResult {
-	s.player.send(Cmd::Shuffle).await;
 	ok()
 }
 async fn queue_remove(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {

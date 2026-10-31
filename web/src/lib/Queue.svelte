@@ -40,7 +40,6 @@
   <header>
     <h3>Up next <span class="count mono muted">{queue.length}{total ? ` · ${fmtTotal(total)}` : ''}</span></h3>
     <div class="acts">
-      <button class="ghost" title="shuffle" disabled={queue.length < 2} onclick={() => store.run(api.queueShuffle())}><Icon name="shuffle" /> Shuffle</button>
       <button class="ghost danger" title="clear queue" disabled={!queue.length} onclick={() => { if (confirm('Clear the whole queue?')) store.run(api.queueClear()) }}><Icon name="trash" /> Clear</button>
     </div>
   </header>
