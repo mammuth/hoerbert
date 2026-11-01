@@ -462,6 +462,13 @@ impl Player {
 		let _ = self.ts_tx.try_send(TsCmd::SendMessage { target: MessageTarget::Channel, text });
 	}
 
+	/// Show a playback error in the web UI and the channel chat, so listeners
+	/// see why nothing plays (e.g. YouTube's bot check).
+	fn report_error(&mut self, msg: String) {
+		self.announce(format!("⚠ {msg}"));
+		self.last_error = Some(msg);
+	}
+
 	/// Nobody is listening: pause and free the stream so we don't keep
 	/// streaming into an empty channel. Resumes once listeners are back.
 	async fn auto_pause(&mut self) {
@@ -516,7 +523,7 @@ impl Player {
 			Ok(dec) => c.decoder = Some(dec),
 			Err(e) => {
 				error!(error = %e, "seek failed to restart decoder");
-				self.last_error = Some(format!("{e:#}"));
+				self.report_error(format!("{e:#}"));
 			}
 		}
 	}
@@ -647,14 +654,15 @@ impl Player {
 					}
 					Err(e) => {
 						error!(error = %e, "ffmpeg spawn failed");
-						self.last_error = Some(format!("{e:#}"));
+						self.report_error(format!("{e:#}"));
 						self.finish_current().await;
 						self.start_next().await;
 					}
 				}
 			}
 			Err(e) => {
-				self.last_error = Some(format!("{}: {e:#}", c.item.track.title));
+				let title = c.item.track.title.clone();
+				self.report_error(format!("{title}: {e:#}"));
 				self.resolve_failures += 1;
 				// A bot check / login wall hits every track: skipping would just
 				// drain the queue. Stop and keep the track instead.
@@ -664,7 +672,7 @@ impl Player {
 					self.resolve_failures = 0;
 					self.stop().await;
 				} else {
-					warn!(error = %e, title = %c.item.track.title, "could not resolve stream, skipping");
+					warn!(error = %e, title = %title, "could not resolve stream, skipping");
 					self.finish_current().await;
 					self.start_next().await;
 				}
@@ -718,6 +726,7 @@ impl Player {
 		let mut skip_to: Option<f64> = None;
 		let mut publish = false;
 		let mut music: Option<Frame> = None;
+		let mut error: Option<String> = None;
 
 		if self.empty_since.is_some_and(|t| t.elapsed() > EMPTY_CHANNEL_GRACE)
 			&& self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Playing)
@@ -784,7 +793,7 @@ impl Player {
 									retry = Some((pos, c.pipe_fallback));
 								} else {
 									if produced == 0 && !err.is_empty() {
-										self.last_error = Some(format!("{}: {}", c.item.track.title, err.lines().last().unwrap_or("")));
+										error = Some(format!("{}: {}", c.item.track.title, err.lines().last().unwrap_or("")));
 									}
 									finished = true;
 								}
@@ -831,6 +840,9 @@ impl Player {
 		if let Some((pos, use_pipe)) = retry {
 			self.retry_current(pos, use_pipe).await;
 			publish = true;
+		}
+		if let Some(msg) = error {
+			self.report_error(msg);
 		}
 		if finished {
 			let title = self.current.as_ref().map(|c| c.item.track.title.clone()).unwrap_or_default();
@@ -884,7 +896,7 @@ impl Player {
 			match Decoder::spawn_pipe(&cfg, &c.item.track.url, pos) {
 				Ok(d) => c.decoder = Some(d),
 				Err(e) => {
-					self.last_error = Some(format!("{e:#}"));
+					self.report_error(format!("{e:#}"));
 					self.finish_current().await;
 					self.start_next().await;
 				}
