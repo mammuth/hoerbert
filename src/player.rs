@@ -225,9 +225,17 @@ impl Player {
 		tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
 		// Start idle: the restored queue waits for an explicit play.
 		self.publish();
+		let mut ticking = false;
 		loop {
+			// Idle/paused/loading: no tick, so the actor sleeps until a command.
+			let needs_tick = self.needs_tick();
+			if needs_tick && !ticking {
+				// Burst would otherwise replay every tick missed while idle.
+				tick.reset();
+			}
+			ticking = needs_tick;
 			tokio::select! {
-				t = tick.tick() => self.on_tick(t.elapsed()).await,
+				t = tick.tick(), if needs_tick => self.on_tick(t.elapsed()).await,
 				Some(cmd) = cmd_rx.recv() => {
 					self.handle(cmd).await;
 					// The queue head may have changed (request added, moved…).
@@ -241,10 +249,16 @@ impl Player {
 					self.publish();
 				}
 			}
-			if self.dirty && self.last_save.elapsed() > Duration::from_secs(1) {
+			// Without ticks no later iteration may come to flush a debounced save.
+			if self.dirty && (!needs_tick || self.last_save.elapsed() > Duration::from_secs(1)) {
 				self.save();
 			}
 		}
+	}
+
+	/// Only playing music or a soundboard clip needs the 20 ms audio tick.
+	fn needs_tick(&self) -> bool {
+		self.sfx.is_some() || self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Playing)
 	}
 
 	fn save(&mut self) {
