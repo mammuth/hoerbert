@@ -71,6 +71,8 @@ pub struct TsStatus {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub channel: Option<String>,
 	pub listeners: u32,
+	/// Names of the other clients in the bot's channel.
+	pub users: Vec<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub error: Option<String>,
 }

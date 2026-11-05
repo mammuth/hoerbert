@@ -41,6 +41,7 @@ export interface TsStatus {
   server: string
   channel?: string
   listeners: number
+  users: string[]
   error?: string
 }
 

@@ -114,6 +114,7 @@ async fn run(cfg: Config, mut chans: TsChannels) {
 						server: cfg.ts_address.clone(),
 						channel: None,
 						listeners: 0,
+						users: Vec::new(),
 						error: Some(format!("{e:#}")),
 					}))
 					.await;
@@ -129,7 +130,7 @@ async fn run(cfg: Config, mut chans: TsChannels) {
 }
 
 fn status_from_book(cfg: &Config, con: &Connection, connected: bool) -> TsStatus {
-	let mut status = TsStatus { connected, server: cfg.ts_address.clone(), channel: None, listeners: 0, error: None };
+	let mut status = TsStatus { connected, server: cfg.ts_address.clone(), channel: None, listeners: 0, users: Vec::new(), error: None };
 	if let Ok(book) = con.get_state() {
 		if let Some(me) = book.clients.get(&book.own_client) {
 			status.channel = book.channels.get(&me.channel).map(|c| c.name.clone());
@@ -138,6 +139,13 @@ fn status_from_book(cfg: &Config, con: &Connection, connected: bool) -> TsStatus
 				.values()
 				.filter(|c| c.channel == me.channel && c.id != me.id && !c.output_muted && !c.away_message.is_some())
 				.count() as u32;
+			status.users = book
+				.clients
+				.values()
+				.filter(|c| c.channel == me.channel && c.id != me.id)
+				.map(|c| c.name.clone())
+				.collect();
+			status.users.sort_by_key(|n| n.to_lowercase());
 		}
 		if !status.server.contains(&book.server.name) {
 			status.server = format!("{} ({})", book.server.name, cfg.ts_address);

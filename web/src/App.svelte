@@ -26,7 +26,7 @@
       {#if !store.connected}
         <span class="pill off"><span class="dot"></span> reconnecting…</span>
       {:else if ts?.connected}
-        <span class="pill on" title={ts.server}>
+        <span class="pill on" title={[ts.server, ...ts.users].join('\n')}>
           <span class="dot"></span>
           {ts.channel ?? 'connected'}
           <span class="sep">·</span>
