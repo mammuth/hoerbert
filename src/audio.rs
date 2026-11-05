@@ -7,7 +7,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -87,7 +87,31 @@ impl Decoder {
 		let mut yt_child = yt.spawn().context("failed to start yt-dlp")?;
 		let yt_stdout = yt_child.stdout.take().ok_or_else(|| anyhow!("yt-dlp stdout missing"))?;
 		let yt_stdout: Stdio = yt_stdout.try_into().map_err(|_| anyhow!("failed to convert yt-dlp stdout"))?;
+		let ff_child = Self::spawn_ffmpeg_stdin(cfg, yt_stdout, start_secs)?;
+		Self::wrap(vec![yt_child, ff_child])
+	}
 
+	/// Speech: espeak-ng writes a WAV to stdout, piped into ffmpeg.
+	pub fn spawn_tts(cfg: &Config, text: &str, voice: &str) -> Result<Decoder> {
+		let mut es = Command::new(&cfg.espeak_bin);
+		// Text via stdin, so it can never be mistaken for an option.
+		es.args(["--stdin", "--stdout", "-v", voice, "-s"]).arg(cfg.tts_speed.to_string());
+		es.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+		debug!(?es, "spawning espeak-ng");
+		let mut es_child = es.spawn().context("failed to start espeak-ng")?;
+		let mut stdin = es_child.stdin.take().ok_or_else(|| anyhow!("espeak-ng stdin missing"))?;
+		let text = text.to_owned();
+		tokio::spawn(async move {
+			let _ = stdin.write_all(text.as_bytes()).await;
+			// dropping stdin sends EOF, which starts the synthesis
+		});
+		let es_stdout = es_child.stdout.take().ok_or_else(|| anyhow!("espeak-ng stdout missing"))?;
+		let es_stdout: Stdio = es_stdout.try_into().map_err(|_| anyhow!("failed to convert espeak-ng stdout"))?;
+		let ff_child = Self::spawn_ffmpeg_stdin(cfg, es_stdout, 0.0)?;
+		Self::wrap(vec![es_child, ff_child])
+	}
+
+	fn spawn_ffmpeg_stdin(cfg: &Config, input: Stdio, start_secs: f64) -> Result<Child> {
 		let mut ff = Command::new(&cfg.ffmpeg_bin);
 		ff.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
 		if start_secs > 0.0 {
@@ -95,9 +119,8 @@ impl Decoder {
 		}
 		ff.args(["-i", "pipe:0"]);
 		Self::output_args(&mut ff);
-		ff.stdin(yt_stdout).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-		let ff_child = ff.spawn().context("failed to start ffmpeg")?;
-		Self::wrap(vec![yt_child, ff_child])
+		ff.stdin(input).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+		ff.spawn().context("failed to start ffmpeg")
 	}
 
 	fn output_args(cmd: &mut Command) {

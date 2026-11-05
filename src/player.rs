@@ -1,7 +1,7 @@
 //! The player actor: owns queue, history and the current track, runs the
 //! 20 ms audio tick (PCM → gain → Opus) and publishes state snapshots.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,6 +21,7 @@ use crate::soundboard::Sound;
 use crate::sponsorblock;
 use crate::store::{Persisted, Store};
 use crate::ts::{AudioOut, TsCmd};
+use crate::tts::Speech;
 
 const HISTORY_MAX: usize = 50;
 const EVENTS_MAX: usize = 100;
@@ -33,6 +34,10 @@ const STREAM_CACHE_TTL: Duration = Duration::from_secs(45 * 60);
 const MAX_RETRIES: u8 = 2;
 /// Pause once nobody has been listening in our channel for this long.
 const EMPTY_CHANNEL_GRACE: Duration = Duration::from_secs(60);
+/// Speech messages waiting beyond this are dropped.
+const SPEECH_QUEUE_MAX: usize = 5;
+/// Music gain change per 20 ms frame while (un)ducking: ~0.3 s fade.
+const DUCK_STEP: f32 = 0.05;
 
 pub enum Cmd {
 	Add { tracks: Vec<Track>, requested_by: Option<String>, next: bool, play_now: bool },
@@ -50,6 +55,8 @@ pub enum Cmd {
 	TsStatus(TsStatus),
 	/// Soundboard clip, mixed over the music.
 	PlaySound(Sound),
+	/// Text to speech; queued, the music ducks while it talks.
+	Say(Speech),
 }
 
 #[derive(Clone)]
@@ -132,6 +139,11 @@ pub struct Player {
 	sfx: Option<Decoder>,
 	/// Gain of `sfx` relative to the music.
 	sfx_gain: f32,
+	/// Speech currently talking, and the messages waiting after it.
+	speech: Option<Decoder>,
+	speeches: VecDeque<(Speech, Option<String>)>,
+	/// Current music gain, faded towards `tts_duck` while speech talks.
+	duck: f32,
 	volume: f32,
 	ts_status: TsStatus,
 	last_error: Option<String>,
@@ -185,6 +197,9 @@ pub fn spawn(
 		current: None,
 		sfx: None,
 		sfx_gain: 1.0,
+		speech: None,
+		speeches: VecDeque::new(),
+		duck: 1.0,
 		ts_status,
 		last_error: None,
 		resolve_failures: 0,
@@ -266,9 +281,9 @@ impl Player {
 		}
 	}
 
-	/// Only playing music or a soundboard clip needs the 20 ms audio tick.
+	/// Only playing music, a soundboard clip or speech needs the 20 ms audio tick.
 	fn needs_tick(&self) -> bool {
-		self.sfx.is_some() || self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Playing)
+		self.sfx.is_some() || self.speech.is_some() || self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Playing)
 	}
 
 	fn save(&mut self) {
@@ -467,6 +482,16 @@ impl Player {
 						self.log(by, EventKind::Sound { name: sound.name, emoji: sound.emoji });
 					}
 					Err(e) => warn!(error = %e, url = %stream.url, "could not start sound"),
+				}
+			}
+			Cmd::Say(speech) => {
+				if self.speeches.len() >= SPEECH_QUEUE_MAX {
+					warn!(text = %speech.text, "speech queue full, dropping message");
+					return;
+				}
+				self.speeches.push_back((speech, by));
+				if self.speech.is_none() {
+					self.start_speech();
 				}
 			}
 			Cmd::TsStatus(s) => {
@@ -879,14 +904,30 @@ impl Player {
 		}
 
 		let has_music = music.is_some();
-		let sfx = self.pull_sfx();
-		if has_music || sfx.is_some() {
+		let (sfx, sfx_ended) = pull_overlay(&mut self.sfx, "sound");
+		let (speech, speech_ended) = pull_overlay(&mut self.speech, "speech");
+		if speech_ended {
+			self.start_speech();
+		}
+		if (sfx_ended || speech_ended) && self.sfx.is_none() && self.speech.is_none() && !self.current.as_ref().is_some_and(|c| c.talking) {
+			// Stop talking unless the music keeps going.
+			let _ = self.audio_tx.try_send(AudioOut::End);
+		}
+		// Duck while speech is on, including espeak's startup.
+		let duck_to = if self.speech.is_some() { self.cfg.tts_duck } else { 1.0 };
+		let duck_from = self.duck;
+		self.duck += (duck_to - self.duck).clamp(-DUCK_STEP, DUCK_STEP);
+		if has_music || sfx.is_some() || speech.is_some() {
+			let tts_gain = self.cfg.tts_volume;
 			// Mix in f32 so a boosted clip only clips after the master volume.
 			let pcm: Frame = (0..FRAME_LEN)
 				.map(|i| {
-					let m = music.as_ref().map_or(0.0, |f| f[i] as f32);
+					// Ramp the duck gain across the frame so the fade doesn't click.
+					let duck = duck_from + (self.duck - duck_from) * (i as f32 / FRAME_LEN as f32);
+					let m = music.as_ref().map_or(0.0, |f| f[i] as f32 * duck);
 					let s = sfx.as_ref().map_or(0.0, |f| f[i] as f32 * self.sfx_gain);
-					((m + s) * self.volume).clamp(i16::MIN as f32, i16::MAX as f32) as i16
+					let v = speech.as_ref().map_or(0.0, |f| f[i] as f32 * tts_gain);
+					((m + s + v) * self.volume).clamp(i16::MIN as f32, i16::MAX as f32) as i16
 				})
 				.collect();
 			match self.encoder.encode(&pcm[..FRAME_LEN], &mut self.opus_buf) {
@@ -927,24 +968,16 @@ impl Player {
 		}
 	}
 
-	/// Next frame of the soundboard clip, if one is playing and has data.
-	fn pull_sfx(&mut self) -> Option<Frame> {
-		let dec = self.sfx.as_mut()?;
-		match dec.pull() {
-			Pull::Frame(f) => Some(f),
-			Pull::Starved => None,
-			Pull::Ended => {
-				if dec.produced_frames == 0 {
-					warn!(error = %dec.error_tail(), "sound produced no audio");
+	/// Starts the next queued speech message, skipping ones espeak can't start.
+	fn start_speech(&mut self) {
+		while let Some((speech, by)) = self.speeches.pop_front() {
+			match Decoder::spawn_tts(&self.cfg, &speech.text, &speech.voice) {
+				Ok(d) => {
+					self.speech = Some(d);
+					self.log(by, EventKind::Tts { text: speech.text, voice: speech.voice });
+					return;
 				}
-				if let Some(d) = self.sfx.take() {
-					tokio::spawn(d.kill());
-				}
-				// Stop talking unless the music keeps going.
-				if !self.current.as_ref().is_some_and(|c| c.talking) {
-					let _ = self.audio_tx.try_send(AudioOut::End);
-				}
-				None
+				Err(e) => warn!(error = %e, "could not start speech"),
 			}
 		}
 	}
@@ -982,3 +1015,21 @@ impl Player {
 	}
 }
 
+/// Next frame of a soundboard clip or speech, if one is playing and has data,
+/// and whether it just ended.
+fn pull_overlay(slot: &mut Option<Decoder>, what: &str) -> (Option<Frame>, bool) {
+	let Some(dec) = slot.as_mut() else { return (None, false) };
+	match dec.pull() {
+		Pull::Frame(f) => (Some(f), false),
+		Pull::Starved => (None, false),
+		Pull::Ended => {
+			if dec.produced_frames == 0 {
+				warn!(error = %dec.error_tail(), "{what} produced no audio");
+			}
+			if let Some(d) = slot.take() {
+				tokio::spawn(d.kill());
+			}
+			(None, true)
+		}
+	}
+}

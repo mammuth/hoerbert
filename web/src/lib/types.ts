@@ -31,7 +31,11 @@ export type PlayerEvent = { id: string; at: number; by?: string } & (
   | { kind: 'prev' | 'remove'; title: string }
   | { kind: 'clear'; count: number }
   | { kind: 'sound'; name: string; emoji?: string }
+  | { kind: 'tts'; text: string; voice: string }
 )
+
+/** Text to speech settings; absent when the server has it off. */
+export interface TtsInfo { max_chars: number }
 
 export interface Segment { start: number; end: number; category: string }
 

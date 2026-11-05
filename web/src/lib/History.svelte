@@ -28,7 +28,7 @@
 
   const icons: Record<PlayerEvent['kind'], string> = {
     pause: 'pause', resume: 'play', auto_pause: 'pause', auto_resume: 'play',
-    skip: 'skip', prev: 'prev', stop: 'stop', clear: 'trash', remove: 'x', sound: 'volume',
+    skip: 'skip', prev: 'prev', stop: 'stop', clear: 'trash', remove: 'x', sound: 'volume', tts: 'volume',
   }
 
   function describe(ev: PlayerEvent): string {
@@ -43,6 +43,7 @@
       case 'clear': return `cleared the queue (${ev.count})`
       case 'remove': return `removed ${ev.title}`
       case 'sound': return `played ${ev.name}`
+      case 'tts': return `said ${ev.text}`
     }
   }
 
@@ -71,6 +72,12 @@
         <li class="ev sound rise" style="animation-delay: {Math.min(i, 12) * 20}ms" title={stamp(e.at)}>
           <span class="emoji">{e.ev.emoji ?? '🔈'}</span>
           <div class="line ellipsis"><b>{e.ev.by ?? 'Someone'}</b> played <span class="sname">{e.ev.name}</span>{#if e.count > 1}<span class="times">×{e.count}</span>{/if}</div>
+          <span class="when">{clock(e.at)}</span>
+        </li>
+      {:else if e.ev.kind === 'tts'}
+        <li class="ev sound tts rise" style="animation-delay: {Math.min(i, 12) * 20}ms" title="{stamp(e.at)} · {e.ev.voice}">
+          <span class="emoji">🗣️</span>
+          <div class="line ellipsis"><b>{e.ev.by ?? 'Someone'}</b> said <q class="sname">{e.ev.text}</q>{#if e.count > 1}<span class="times">×{e.count}</span>{/if}</div>
           <span class="when">{clock(e.at)}</span>
         </li>
       {:else}
@@ -110,4 +117,6 @@
   .ev.sound { padding: 5px 6px; margin: 2px 0; background: linear-gradient(90deg, rgba(255, 122, 26, 0.12), transparent 75%); border-left: 2px solid var(--accent); border-radius: 4px 10px 10px 4px; }
   .sound .emoji { justify-self: center; font-size: 20px; line-height: 1; transform: rotate(-6deg); }
   .sname { color: var(--accent-2); font-weight: 600; }
+  .tts .line { white-space: normal; overflow-wrap: anywhere; }
+  .tts .sname { font-weight: 500; font-style: italic; }
 </style>

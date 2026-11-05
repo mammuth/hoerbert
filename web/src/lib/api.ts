@@ -1,5 +1,5 @@
 import { store } from './store.svelte'
-import type { Sound, Track } from './types'
+import type { Sound, Track, TtsInfo } from './types'
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -29,6 +29,7 @@ export const api = {
   queueRemove: (id: string) => req('POST', `/queue/${id}/remove`, by()),
   queueMove: (id: string, to: number) => req('POST', `/queue/${id}/move`, { to }),
   queuePlay: (id: string) => req('POST', `/queue/${id}/play`),
-  sounds: () => req<{ sounds: Sound[] }>('GET', '/sounds'),
+  sounds: () => req<{ sounds: Sound[]; tts?: TtsInfo | null }>('GET', '/sounds'),
   playSound: (slug: string) => req('POST', `/sounds/${encodeURIComponent(slug)}/play`, by()),
+  say: (text: string, voice: string | undefined, who: string) => req('POST', '/tts', { text, voice, by: who }),
 }

@@ -8,6 +8,7 @@ mod soundboard;
 mod sponsorblock;
 mod store;
 mod ts;
+mod tts;
 mod web;
 
 use anyhow::{Context, Result};
@@ -27,6 +28,7 @@ async fn main() -> Result<()> {
 	let store = store::Store::new(&cfg.data_dir)?;
 	let resolver = resolver::Resolver::new(cfg.clone());
 	let soundboard = soundboard::Soundboard::new(cfg.soundboard_file.clone());
+	let tts = tts::Tts::new(cfg.clone());
 
 	// Opus frames: player → TeamSpeak thread. Small buffer: we pace at 20 ms.
 	let (audio_tx, audio_rx) = mpsc::channel(32);
@@ -51,12 +53,13 @@ async fn main() -> Result<()> {
 			player: player.clone(),
 			resolver: resolver.clone(),
 			soundboard: soundboard.clone(),
+			tts: tts.clone(),
 			ts_tx: ts_cmd_tx,
 		},
 		ts_event_rx,
 	));
 
-	let app = web::router(web::AppState { player, resolver, soundboard, auth: web::Auth::new(cfg.web_key.clone()) });
+	let app = web::router(web::AppState { player, resolver, soundboard, tts, auth: web::Auth::new(cfg.web_key.clone()) });
 	let listener = tokio::net::TcpListener::bind(&cfg.web_bind).await.with_context(|| format!("binding {}", cfg.web_bind))?;
 	info!("web ui listening on http://{}", cfg.web_bind);
 	info!(key = %cfg.web_key, link = cfg.web_link().as_deref().unwrap_or("(set PUBLIC_URL)"), "web ui key");

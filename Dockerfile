@@ -23,7 +23,7 @@ RUN touch src/main.rs && cargo build --release --locked && strip target/release/
 FROM debian:bookworm-slim
 ARG DENO_VERSION=v2.9.8
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg libopus0 ca-certificates curl unzip python3 python3-venv tini \
+      ffmpeg espeak-ng libopus0 ca-certificates curl unzip python3 python3-venv tini \
     && rm -rf /var/lib/apt/lists/*
 # Deno: JS runtime yt-dlp needs for YouTube's signature challenges
 RUN ARCH="$(uname -m)" && case "$ARCH" in x86_64) DA=x86_64 ;; aarch64) DA=aarch64 ;; *) echo "unsupported arch $ARCH" && exit 1 ;; esac \

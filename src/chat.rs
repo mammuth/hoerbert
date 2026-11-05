@@ -10,12 +10,14 @@ use crate::player::{Cmd, PlayerHandle};
 use crate::resolver::Resolver;
 use crate::soundboard::Soundboard;
 use crate::ts::{TsCmd, TsEvent};
+use crate::tts::Tts;
 
 pub struct ChatContext {
 	pub cfg: Config,
 	pub player: PlayerHandle,
 	pub resolver: Resolver,
 	pub soundboard: Soundboard,
+	pub tts: Tts,
 	pub ts_tx: mpsc::Sender<TsCmd>,
 }
 
@@ -70,7 +72,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 	match cmd.as_str() {
 		"help" | "h" | "?" => {
 			let has_sounds = !ctx.soundboard.list().is_empty();
-			Some(help(prefix, ctx.cfg.web_link().as_deref(), ctx.cfg.help_suffix.as_deref(), has_sounds))
+			Some(help(prefix, ctx.cfg.web_link().as_deref(), ctx.cfg.help_suffix.as_deref(), has_sounds, ctx.tts.enabled()))
 		}
 		"play" | "p" | "add" | "search" | "yt" | "next" | "playnow" => {
 			if arg.is_empty() {
@@ -159,6 +161,20 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 			}
 			Some(s)
 		}
+		// `!tts:en hello` picks a voice, `!tts:+whisper` a variant of the default one.
+		c if ctx.tts.enabled() && (c == "tts" || c == "say" || c.starts_with("tts:")) => {
+			if arg.is_empty() {
+				return Some(format!("usage: {prefix}tts <text> · {prefix}tts:en <text> · {prefix}tts:+whisper <text>"));
+			}
+			let voice = c.split_once(':').map(|(_, v)| v);
+			match ctx.tts.prepare(arg, voice, &invoker.name) {
+				Ok(speech) => {
+					ctx.player.send_as(Cmd::Say(speech), who).await;
+					None
+				}
+				Err(e) => Some(format!("✖ {e}")),
+			}
+		}
 		// Built-in commands above win over sounds with the same slug.
 		slug => {
 			let sound = ctx.soundboard.get(slug)?;
@@ -190,7 +206,7 @@ fn now_playing(snap: &crate::model::StateSnapshot) -> String {
 	}
 }
 
-fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>, has_sounds: bool) -> String {
+fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>, has_sounds: bool, tts: bool) -> String {
 	let mut s = format!(
 		"🎵 Hörbert\n\
 		 {p}play <link or search> – add to queue\n\
@@ -201,6 +217,9 @@ fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>, has_sounds: bool)
 	);
 	if has_sounds {
 		s.push_str(&format!("\n{prefix}soundboard – list sounds"));
+	}
+	if tts {
+		s.push_str(&format!("\n{prefix}tts <text> – say something (voices: {prefix}tts:en, {prefix}tts:+whisper …)"));
 	}
 	if let Some(u) = url {
 		s.push_str(&format!("\n🎛 {u}"));

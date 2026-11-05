@@ -19,6 +19,7 @@ use crate::model::Track;
 use crate::player::{Cmd, PlayerHandle};
 use crate::resolver::Resolver;
 use crate::soundboard::Soundboard;
+use crate::tts::{Tts, TtsError};
 
 #[derive(Embed)]
 #[folder = "web/dist/"]
@@ -29,6 +30,7 @@ pub struct AppState {
 	pub player: PlayerHandle,
 	pub resolver: Resolver,
 	pub soundboard: Soundboard,
+	pub tts: Tts,
 	pub auth: Auth,
 }
 
@@ -144,6 +146,7 @@ pub fn router(state: AppState) -> Router {
 		.route("/queue/{id}/play", post(queue_play))
 		.route("/sounds", get(sounds))
 		.route("/sounds/{slug}/play", post(sound_play))
+		.route("/tts", post(tts))
 		.route_layer(middleware::from_fn_with_state(state.clone(), require_key))
 		.route("/login", post(login));
 	Router::new()
@@ -348,10 +351,33 @@ async fn queue_play(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResul
 // -------------------------------------------------------------- soundboard
 
 async fn sounds(State(s): State<AppState>) -> Response {
-	Json(json!({ "sounds": s.soundboard.list() })).into_response()
+	let tts = s.tts.enabled().then(|| json!({ "max_chars": s.tts.max_chars() }));
+	Json(json!({ "sounds": s.soundboard.list(), "tts": tts })).into_response()
 }
 async fn sound_play(State(s): State<AppState>, Path(slug): Path<String>, body: Option<Json<ByBody>>) -> ApiResult {
 	let sound = s.soundboard.get(&slug.to_ascii_lowercase()).ok_or_else(not_found)?;
 	s.player.send_as(Cmd::PlaySound(sound), actor(body)).await;
+	ok()
+}
+
+#[derive(Deserialize)]
+struct TtsBody {
+	text: String,
+	#[serde(default)]
+	voice: Option<String>,
+	#[serde(default)]
+	by: Option<String>,
+}
+async fn tts(State(s): State<AppState>, Json(b): Json<TtsBody>) -> ApiResult {
+	if !s.tts.enabled() {
+		return Err(not_found());
+	}
+	// The cooldown is per name, so speaking needs one.
+	let by = b.by.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).ok_or_else(|| bad("enter your name first"))?;
+	let speech = s.tts.prepare(&b.text, b.voice.as_deref(), &by).map_err(|e| match e {
+		TtsError::Cooldown(_) => ApiError(StatusCode::TOO_MANY_REQUESTS, e.to_string()),
+		TtsError::Invalid(_) => bad(e.to_string()),
+	})?;
+	s.player.send_as(Cmd::Say(speech), Some(by)).await;
 	ok()
 }

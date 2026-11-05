@@ -83,6 +83,7 @@ pub enum EventKind {
 	Clear { count: usize },
 	Remove { title: String },
 	Sound { name: String, #[serde(default, skip_serializing_if = "Option::is_none")] emoji: Option<String> },
+	Tts { text: String, voice: String },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

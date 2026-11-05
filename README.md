@@ -44,6 +44,13 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `SOUNDBOARD_FILE` | `$DATA_DIR/sounds.json` | soundboard config, see below |
 | `SOUNDBOARD_VOLUME` | `5` | sound loudness relative to the music |
 | `HISTORY_HOURS` | `168` | forget history (tracks and actions) older than this |
+| `TTS` | `true` | text to speech, see below (off if `espeak-ng` is missing) |
+| `TTS_VOICE` | `de` | espeak-ng `language[+variant]`, e.g. `en`, `de+klatt` |
+| `TTS_SPEED` | `160` | words per minute |
+| `TTS_MAX_CHARS` | `200` | longer messages are cut |
+| `TTS_COOLDOWN` | `10` | seconds between two messages per user |
+| `TTS_VOLUME` | `4` | speech loudness relative to the music |
+| `TTS_DUCK` | `0.3` | music gain while speaking (`1` = no ducking) |
 | `YTDLP_ARGS` | — | extra yt-dlp args (cookies, player clients, PO token provider) |
 | `YTDLP_AUTO_UPDATE` | `true` | `pip install -U yt-dlp` on container start |
 | `DATA_DIR` | `data` | state + identity |
@@ -62,6 +69,9 @@ keeps strangers out, but it is not strong security.
 !skip  !prev  !pause
 !now  !queue  !clear
 !soundboard              list sounds, play one with !<slug>
+!tts <text>              say something (also !say)
+!tts:en <text>           …in another language
+!tts:+whisper <text>     …with a voice variant (croak, klatt, Demonic, grandpa, …)
 ```
 
 ### Soundboard
@@ -79,6 +89,15 @@ command and a button in the web UI. Clips are mixed over the music.
 `url` is anything ffmpeg reads; relative paths resolve against the file's
 directory. `volume` (default `1.0`) evens out loud and quiet clips. Slugs are `[a-z0-9_-]`; built-in commands win over equal slugs. The
 file is re-read on use, so edits apply without a restart.
+
+### Text to speech
+
+`!tts` and the web UI's *Say* box read text out loud with
+[espeak-ng](https://github.com/espeak-ng/espeak-ng): tiny, offline, and
+gloriously robotic. Messages queue up instead of cutting each other off, the
+music ducks while the bot talks, links are read as "link", and each user has
+to wait `TTS_COOLDOWN` seconds between messages. `espeak-ng --voices` and
+`espeak-ng --voices=variant` list what's available.
 
 ## When YouTube says “Sign in to confirm you’re not a bot”
 
