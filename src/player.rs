@@ -974,7 +974,9 @@ impl Player {
 			match Decoder::spawn_tts(&self.cfg, &speech.text, &speech.voice) {
 				Ok(d) => {
 					self.speech = Some(d);
-					self.log(by, EventKind::Tts { text: speech.text, voice: speech.voice });
+					if speech.logged {
+						self.log(by, EventKind::Tts { text: speech.text, voice: speech.voice });
+					}
 					return;
 				}
 				Err(e) => warn!(error = %e, "could not start speech"),

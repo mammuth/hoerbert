@@ -83,7 +83,7 @@ impl Greeter {
 		}
 		let g = greetings.choose(&mut rand::rng())?;
 		match self.tts.speech(&g.text.replace("{name}", name), g.lang.as_deref()) {
-			Ok(s) => Some(s),
+			Ok(s) => Some(Speech { logged: false, ..s }),
 			Err(e) => {
 				warn!(error = %e, text = %g.text, "skipping greeting");
 				None

@@ -24,6 +24,8 @@ pub enum TtsError {
 pub struct Speech {
 	pub text: String,
 	pub voice: String,
+	/// Shown in the history; greetings are not.
+	pub logged: bool,
 }
 
 #[derive(Clone)]
@@ -85,7 +87,7 @@ impl Tts {
 		if text.is_empty() {
 			return Err(TtsError::Invalid("nothing to say".into()));
 		}
-		Ok(Speech { voice: self.voice(voice)?, text })
+		Ok(Speech { voice: self.voice(voice)?, text, logged: true })
 	}
 
 	/// `None`: the default voice. `+variant` keeps the default language.
