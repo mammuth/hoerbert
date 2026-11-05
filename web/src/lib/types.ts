@@ -27,7 +27,8 @@ export interface Sound {
 
 export type PlayerEvent = { id: string; at: number; by?: string } & (
   | { kind: 'pause' | 'resume' | 'auto_pause' | 'auto_resume' | 'stop' }
-  | { kind: 'skip' | 'prev' | 'remove'; title: string }
+  | { kind: 'skip'; title: string; requested_by?: string }
+  | { kind: 'prev' | 'remove'; title: string }
   | { kind: 'clear'; count: number }
   | { kind: 'sound'; name: string; emoji?: string }
 )

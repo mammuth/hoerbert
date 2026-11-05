@@ -37,7 +37,7 @@
       case 'resume': return 'resumed'
       case 'auto_pause': return 'Paused, nobody listening'
       case 'auto_resume': return 'Resumed, listeners are back'
-      case 'skip': return `skipped ${ev.title}`
+      case 'skip': return `skipped ${ev.title}${ev.requested_by ? ` (queued by ${ev.requested_by})` : ''}`
       case 'prev': return `went back to ${ev.title}`
       case 'stop': return 'stopped playback'
       case 'clear': return `cleared the queue (${ev.count})`

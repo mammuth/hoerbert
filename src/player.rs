@@ -204,6 +204,7 @@ pub fn spawn(
 		last_save: Instant::now(),
 		last_publish: Instant::now(),
 	};
+	player.prune_history();
 	let (state_tx, state_rx) = watch::channel(Arc::new(player.snapshot()));
 	player.state_tx = state_tx;
 	tokio::spawn(async move { player.run(cmd_rx, load_rx).await });
@@ -324,7 +325,15 @@ impl Player {
 	fn log(&mut self, by: Option<String>, kind: EventKind) {
 		self.events.insert(0, Event::new(by, kind));
 		self.events.truncate(EVENTS_MAX);
+		self.prune_history();
 		self.dirty = true;
+	}
+
+	/// Forget tracks and events older than `history_hours`.
+	fn prune_history(&mut self) {
+		let cutoff = now_ms().saturating_sub(self.cfg.history_hours * 3600 * 1000);
+		self.history.retain(|i| i.played_at.unwrap_or(i.added_at) >= cutoff);
+		self.events.retain(|e| e.at >= cutoff);
 	}
 
 	async fn handle(&mut self, cmd: Cmd, by: Option<String>) {
@@ -362,8 +371,8 @@ impl Player {
 			}
 			Cmd::Skip => {
 				if let Some(c) = &self.current {
-					let title = c.item.track.title.clone();
-					self.log(by, EventKind::Skip { title });
+					let (title, requested_by) = (c.item.track.title.clone(), c.item.requested_by.clone());
+					self.log(by, EventKind::Skip { title, requested_by });
 				}
 				self.finish_current().await;
 				self.start_next().await;
@@ -775,6 +784,7 @@ impl Player {
 		}
 		self.history.insert(0, c.item);
 		self.history.truncate(HISTORY_MAX);
+		self.prune_history();
 		self.dirty = true;
 	}
 

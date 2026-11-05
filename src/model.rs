@@ -77,7 +77,7 @@ pub enum EventKind {
 	AutoPause,
 	/// Listeners came back.
 	AutoResume,
-	Skip { title: String },
+	Skip { title: String, #[serde(default, skip_serializing_if = "Option::is_none")] requested_by: Option<String> },
 	Prev { title: String },
 	Stop,
 	Clear { count: usize },
