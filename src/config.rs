@@ -28,6 +28,8 @@ pub struct Config {
 	pub help_suffix: Option<String>,
 	pub soundboard_file: PathBuf,
 	pub soundboard_volume: f32,
+	/// Drop history tracks and events older than this.
+	pub history_hours: u64,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -67,6 +69,7 @@ impl Config {
 			web_key,
 			soundboard_file: env("SOUNDBOARD_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("sounds.json")),
 			soundboard_volume: env("SOUNDBOARD_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(5.0),
+			history_hours: env("HISTORY_HOURS").and_then(|v| v.parse().ok()).unwrap_or(168),
 			data_dir,
 			ytdlp_bin: env("YTDLP_BIN").unwrap_or_else(|| "yt-dlp".into()),
 			ffmpeg_bin: env("FFMPEG_BIN").unwrap_or_else(|| "ffmpeg".into()),

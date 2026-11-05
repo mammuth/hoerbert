@@ -43,6 +43,7 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `HELP_SUFFIX` | — | extra text appended to `!help` (`\n` for line breaks) |
 | `SOUNDBOARD_FILE` | `$DATA_DIR/sounds.json` | soundboard config, see below |
 | `SOUNDBOARD_VOLUME` | `5` | sound loudness relative to the music |
+| `HISTORY_HOURS` | `168` | forget history (tracks and actions) older than this |
 | `YTDLP_ARGS` | — | extra yt-dlp args (cookies, player clients, PO token provider) |
 | `YTDLP_AUTO_UPDATE` | `true` | `pip install -U yt-dlp` on container start |
 | `DATA_DIR` | `data` | state + identity |
