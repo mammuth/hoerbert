@@ -24,7 +24,9 @@ use tracing::{info, warn};
 use crate::tts::{Speech, Tts};
 
 /// Someone hopping between channels is greeted once per this.
-const COOLDOWN: Duration = Duration::from_secs(300);
+const COOLDOWN: Duration = Duration::from_secs(60);
+/// Give the newcomer's client a moment to start playing our audio.
+pub const DELAY: Duration = Duration::from_secs(1);
 
 const DEFAULTS: &str = r#"[
   { "text": "Hey {name}!", "lang": "en" },

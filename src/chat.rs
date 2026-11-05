@@ -30,8 +30,14 @@ pub async fn run(ctx: ChatContext, mut events: mpsc::Receiver<TsEvent>) {
 			TsEvent::Status(s) => ctx.player.send(Cmd::TsStatus(s)).await,
 			TsEvent::Joined { name } => {
 				info!(user = %name, "joined the channel");
-				if let Some(speech) = ctx.greeter.as_ref().and_then(|g| g.greeting(&name)) {
-					ctx.player.send(Cmd::Say(speech)).await;
+				if let Some(greeter) = ctx.greeter.clone() {
+					let player = ctx.player.clone();
+					tokio::spawn(async move {
+						tokio::time::sleep(crate::greet::DELAY).await;
+						if let Some(speech) = greeter.greeting(&name) {
+							player.send(Cmd::Say(speech)).await;
+						}
+					});
 				}
 			}
 			TsEvent::Message { target, invoker, text } => {

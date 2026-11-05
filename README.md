@@ -118,7 +118,7 @@ add your own. `GREET=false` turns greetings off.
 
 - `{name}` is the nickname of whoever joined.
 - `lang` is an espeak-ng `language[+variant]` like `TTS_VOICE` (the default if left out).
-- Each person is greeted at most once every 5 minutes, and nobody already in the
+- Each person is greeted at most once a minute, and nobody already in the
   channel is greeted when the bot (re)connects.
 - The file is re-read on every join, so edits apply without a restart.
 
@@ -158,8 +158,8 @@ Only `TS_ADDRESS` is required.
 | `TTS_VOICE` | `en` | espeak-ng `language[+variant]`, e.g. `de`, `en+klatt` |
 | `TTS_SPEED` | `160` | words per minute |
 | `TTS_MAX_CHARS` | `200` | longer messages are cut |
-| `TTS_COOLDOWN` | `10` | seconds between two messages per user |
-| `TTS_VOLUME` | `4` | speech loudness relative to the music |
+| `TTS_COOLDOWN` | `1` | seconds between two messages per user |
+| `TTS_VOLUME` | `6` | speech loudness relative to the music |
 | `TTS_DUCK` | `0.3` | music gain while speaking (`1` = no ducking) |
 | `GREET` | `true` | greet people joining the channel (needs TTS) |
 | `GREETINGS_FILE` | `$DATA_DIR/greetings.json` | greetings |
