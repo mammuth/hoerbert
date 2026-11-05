@@ -77,7 +77,7 @@
         {@const auto = e.ev.kind === 'auto_pause' || e.ev.kind === 'auto_resume'}
         <li class="ev rise" class:auto style="animation-delay: {Math.min(i, 12) * 20}ms" title={stamp(e.at)}>
           <span class="glyph"><Icon name={icons[e.ev.kind]} size={13} /></span>
-          <div class="line ellipsis">{#if !auto}<b>{e.ev.by ?? 'Someone'}</b> {/if}{describe(e.ev)}{#if e.count > 1}<span class="times">×{e.count}</span>{/if}</div>
+          <div class="line ellipsis">{#if !auto}<b>{e.ev.by ?? 'Someone'}</b>{' '}{/if}{describe(e.ev)}{#if e.count > 1}<span class="times">×{e.count}</span>{/if}</div>
           <span class="when">{clock(e.at)}</span>
         </li>
       {/if}
