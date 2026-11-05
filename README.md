@@ -16,10 +16,7 @@ Control it from a shared web UI or with `!commands` in the chat.
   [SponsorBlock](https://sponsor.ajay.app/) segments on YouTube are skipped.
 - **Soundboard:** your own clips as buttons and `!<name>` commands, mixed over the music.
 - **Text to speech:** `!tts hello` makes the bot talk, with silly voices; the music ducks while it does.
-- **Shared history:** who queued, skipped or paused what, and when.
 - **Good sound:** 48 kHz stereo Opus at 128 kbit/s.
-- **Easy to run:** one Docker container, one Rust binary with the web UI built in,
-  state in a JSON file. Works with TeamSpeak 3 and 6 servers.
 
 ## Quick start
 
