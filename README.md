@@ -1,8 +1,7 @@
 # Hörbert
 
-A music bot for your TeamSpeak server. It joins a channel like any other client
-and plays YouTube, SoundCloud and radio streams for everyone in it.
-Control it from a shared web UI or with `!commands` in the channel chat.
+A TeamSpeak music bot with a soundboard and text to speech.
+Control it from a shared web UI or with `!commands` in the chat.
 
 ![Hörbert web UI](.github/screenshot-webui.png)
 
