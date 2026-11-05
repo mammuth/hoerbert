@@ -18,7 +18,6 @@ Control it from a shared web UI or with `!commands` in the channel chat.
 - **Soundboard:** your own clips as buttons and `!<name>` commands, mixed over the music.
 - **Text to speech:** `!tts hello` makes the bot talk, with silly voices; the music ducks while it does.
 - **Shared history:** who queued, skipped or paused what, and when.
-- **Stays out of the way:** pauses when the channel empties and picks up again when people come back.
 - **Good sound:** 48 kHz stereo Opus at 128 kbit/s.
 - **Easy to run:** one Docker container, one Rust binary with the web UI built in,
   state in a JSON file. Works with TeamSpeak 3 and 6 servers.
@@ -210,14 +209,6 @@ docker run -d --name ts3 -e TS3SERVER_LICENSE=accept -p 9987:9987/udp teamspeak:
 # or TS6
 docker run -d --name ts6 -e TSSERVER_LICENSE_ACCEPTED=accept -p 9987:9987/udp teamspeaksystems/teamspeak6-server
 ```
-
-</details>
-
-<details>
-<summary>Releases</summary>
-
-Every push to `main` runs `.github/workflows/build.yml`, which publishes
-`ghcr.io/mammuth/hoerbert:latest` and `:sha-<commit>` (public package).
 
 </details>
 
