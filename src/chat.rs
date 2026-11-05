@@ -5,6 +5,7 @@ use tracing::{info, warn};
 use tsclientlib::{Invoker, MessageTarget};
 
 use crate::config::Config;
+use crate::greet::Greeter;
 use crate::model::{fmt_duration, PlaybackStatus};
 use crate::player::{Cmd, PlayerHandle};
 use crate::resolver::Resolver;
@@ -18,6 +19,8 @@ pub struct ChatContext {
 	pub resolver: Resolver,
 	pub soundboard: Soundboard,
 	pub tts: Tts,
+	/// `None`: greetings are off.
+	pub greeter: Option<Greeter>,
 	pub ts_tx: mpsc::Sender<TsCmd>,
 }
 
@@ -25,6 +28,12 @@ pub async fn run(ctx: ChatContext, mut events: mpsc::Receiver<TsEvent>) {
 	while let Some(ev) = events.recv().await {
 		match ev {
 			TsEvent::Status(s) => ctx.player.send(Cmd::TsStatus(s)).await,
+			TsEvent::Joined { name } => {
+				info!(user = %name, "joined the channel");
+				if let Some(speech) = ctx.greeter.as_ref().and_then(|g| g.greeting(&name)) {
+					ctx.player.send(Cmd::Say(speech)).await;
+				}
+			}
 			TsEvent::Message { target, invoker, text } => {
 				let reply_target = match target {
 					MessageTarget::Channel => MessageTarget::Channel,
@@ -161,10 +170,10 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 			}
 			Some(s)
 		}
-		// `!tts:en hello` picks a voice, `!tts:+whisper` a variant of the default one.
+		// `!tts:de hallo` picks a voice, `!tts:+whisper` a variant of the default one.
 		c if ctx.tts.enabled() && (c == "tts" || c == "say" || c.starts_with("tts:")) => {
 			if arg.is_empty() {
-				return Some(format!("usage: {prefix}tts <text> · {prefix}tts:en <text> · {prefix}tts:+whisper <text>"));
+				return Some(format!("usage: {prefix}tts <text> · {prefix}tts:de <text> · {prefix}tts:+whisper <text>"));
 			}
 			let voice = c.split_once(':').map(|(_, v)| v);
 			match ctx.tts.prepare(arg, voice, &invoker.name) {
@@ -219,7 +228,7 @@ fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>, has_sounds: bool,
 		s.push_str(&format!("\n{prefix}soundboard – list sounds"));
 	}
 	if tts {
-		s.push_str(&format!("\n{prefix}tts <text> – say something (voices: {prefix}tts:en, {prefix}tts:+whisper …)"));
+		s.push_str(&format!("\n{prefix}tts <text> – say something (voices: {prefix}tts:de, {prefix}tts:+whisper …)"));
 	}
 	if let Some(u) = url {
 		s.push_str(&format!("\n🎛 {u}"));

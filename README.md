@@ -16,6 +16,7 @@ Control it from a shared web UI or with `!commands` in the chat.
   [SponsorBlock](https://sponsor.ajay.app/) segments on YouTube are skipped.
 - **Soundboard:** your own clips as buttons and `!<name>` commands, mixed over the music.
 - **Text to speech:** `!tts hello` makes the bot talk, with silly voices; the music ducks while it does.
+- **Greetings:** says hi when someone joins the channel, with lines you can add to.
 - **Good sound:** 48 kHz stereo Opus at 128 kbit/s.
 
 ## Quick start
@@ -55,7 +56,7 @@ keeps strangers out but is not strong security.
 !link                    link to the web UI
 !soundboard              list sounds, play one with !<slug>
 !tts <text>              say something (also !say)
-!tts:en <text>           …in another language
+!tts:de <text>           …in another language
 !tts:+whisper <text>     …with a voice variant (croak, klatt, Demonic, grandpa, …)
 !help
 ```
@@ -98,6 +99,31 @@ command and a button in the web UI.
 
 </details>
 
+### Greetings
+
+When someone joins the bot's channel, it says a random greeting from
+`./data/greetings.json`. The file is created with a dozen defaults on first start;
+add your own. `GREET=false` turns greetings off.
+
+```json
+[
+  { "text": "Welcome back, {name}!", "lang": "en" },
+  { "text": "Moin {name}!", "lang": "de" },
+  { "text": "Psst. {name} is here.", "lang": "en+whisper" }
+]
+```
+
+<details>
+<summary>Details</summary>
+
+- `{name}` is the nickname of whoever joined.
+- `lang` is an espeak-ng `language[+variant]` like `TTS_VOICE` (the default if left out).
+- Each person is greeted at most once every 5 minutes, and nobody already in the
+  channel is greeted when the bot (re)connects.
+- The file is re-read on every join, so edits apply without a restart.
+
+</details>
+
 ## Configuration
 
 Everything is an environment variable, see [`.env.example`](.env.example).
@@ -129,12 +155,14 @@ Only `TS_ADDRESS` is required.
 | `SOUNDBOARD_VOLUME` | `5` | sound loudness relative to the music |
 | **Text to speech** | | |
 | `TTS` | `true` | enable TTS (off if `espeak-ng` is missing) |
-| `TTS_VOICE` | `de` | espeak-ng `language[+variant]`, e.g. `en`, `de+klatt` |
+| `TTS_VOICE` | `en` | espeak-ng `language[+variant]`, e.g. `de`, `en+klatt` |
 | `TTS_SPEED` | `160` | words per minute |
 | `TTS_MAX_CHARS` | `200` | longer messages are cut |
 | `TTS_COOLDOWN` | `10` | seconds between two messages per user |
 | `TTS_VOLUME` | `4` | speech loudness relative to the music |
 | `TTS_DUCK` | `0.3` | music gain while speaking (`1` = no ducking) |
+| `GREET` | `true` | greet people joining the channel (needs TTS) |
+| `GREETINGS_FILE` | `$DATA_DIR/greetings.json` | greetings |
 | **yt-dlp** | | |
 | `YTDLP_ARGS` | — | extra yt-dlp args (cookies, player clients, PO token provider) |
 | `YTDLP_AUTO_UPDATE` | `true` | `pip install -U yt-dlp` on container start |

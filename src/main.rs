@@ -1,6 +1,7 @@
 mod audio;
 mod chat;
 mod config;
+mod greet;
 mod model;
 mod player;
 mod resolver;
@@ -29,6 +30,7 @@ async fn main() -> Result<()> {
 	let resolver = resolver::Resolver::new(cfg.clone());
 	let soundboard = soundboard::Soundboard::new(cfg.soundboard_file.clone());
 	let tts = tts::Tts::new(cfg.clone());
+	let greeter = (cfg.greet && tts.enabled()).then(|| greet::Greeter::new(cfg.greetings_file.clone(), tts.clone()));
 
 	// Opus frames: player → TeamSpeak thread. Small buffer: we pace at 20 ms.
 	let (audio_tx, audio_rx) = mpsc::channel(32);
@@ -54,6 +56,7 @@ async fn main() -> Result<()> {
 			resolver: resolver.clone(),
 			soundboard: soundboard.clone(),
 			tts: tts.clone(),
+			greeter,
 			ts_tx: ts_cmd_tx,
 		},
 		ts_event_rx,

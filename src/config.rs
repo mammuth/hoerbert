@@ -32,7 +32,7 @@ pub struct Config {
 	pub history_hours: u64,
 	pub tts: bool,
 	pub espeak_bin: String,
-	/// espeak-ng voice, optionally with a variant: `de`, `en+croak`.
+	/// espeak-ng voice, optionally with a variant: `en`, `de+croak`.
 	pub tts_voice: String,
 	pub tts_speed: u32,
 	pub tts_max_chars: usize,
@@ -42,6 +42,9 @@ pub struct Config {
 	pub tts_volume: f32,
 	/// Music gain while someone is talking.
 	pub tts_duck: f32,
+	/// Say hello to people joining the channel.
+	pub greet: bool,
+	pub greetings_file: PathBuf,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -84,12 +87,14 @@ impl Config {
 			history_hours: env("HISTORY_HOURS").and_then(|v| v.parse().ok()).unwrap_or(168),
 			tts: env("TTS").map(|v| v != "false" && v != "0").unwrap_or(true),
 			espeak_bin: env("ESPEAK_BIN").unwrap_or_else(|| "espeak-ng".into()),
-			tts_voice: env("TTS_VOICE").unwrap_or_else(|| "de".into()),
+			tts_voice: env("TTS_VOICE").unwrap_or_else(|| "en".into()),
 			tts_speed: env("TTS_SPEED").and_then(|v| v.parse().ok()).unwrap_or(160),
 			tts_max_chars: env("TTS_MAX_CHARS").and_then(|v| v.parse().ok()).unwrap_or(200),
 			tts_cooldown: env("TTS_COOLDOWN").and_then(|v| v.parse().ok()).unwrap_or(10),
 			tts_volume: env("TTS_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(4.0),
 			tts_duck: env("TTS_DUCK").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.3).clamp(0.0, 1.0),
+			greet: env("GREET").map(|v| v != "false" && v != "0").unwrap_or(true),
+			greetings_file: env("GREETINGS_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("greetings.json")),
 			data_dir,
 			ytdlp_bin: env("YTDLP_BIN").unwrap_or_else(|| "yt-dlp".into()),
 			ffmpeg_bin: env("FFMPEG_BIN").unwrap_or_else(|| "ffmpeg".into()),

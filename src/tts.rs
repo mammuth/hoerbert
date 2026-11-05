@@ -67,11 +67,7 @@ impl Tts {
 
 	/// Cleans the text, checks the voice and enforces the per-user cooldown.
 	pub fn prepare(&self, text: &str, voice: Option<&str>, by: &str) -> Result<Speech, TtsError> {
-		let text = clean(text, self.cfg.tts_max_chars);
-		if text.is_empty() {
-			return Err(TtsError::Invalid("nothing to say".into()));
-		}
-		let voice = self.voice(voice)?;
+		let speech = self.speech(text, voice)?;
 		let cooldown = Duration::from_secs(self.cfg.tts_cooldown);
 		let mut last = self.last.lock().unwrap();
 		last.retain(|_, t| t.elapsed() < cooldown);
@@ -80,7 +76,16 @@ impl Tts {
 			return Err(TtsError::Cooldown((cooldown - t.elapsed()).as_secs() + 1));
 		}
 		last.insert(key, Instant::now());
-		Ok(Speech { text, voice })
+		Ok(speech)
+	}
+
+	/// Cleans the text and checks the voice, no cooldown.
+	pub fn speech(&self, text: &str, voice: Option<&str>) -> Result<Speech, TtsError> {
+		let text = clean(text, self.cfg.tts_max_chars);
+		if text.is_empty() {
+			return Err(TtsError::Invalid("nothing to say".into()));
+		}
+		Ok(Speech { voice: self.voice(voice)?, text })
 	}
 
 	/// `None`: the default voice. `+variant` keeps the default language.

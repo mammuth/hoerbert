@@ -2,8 +2,9 @@
 //! on its own thread with a current-thread runtime and talks to the rest of
 //! the app over channels.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
@@ -11,7 +12,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use tsclientlib::events::Event;
 use tsclientlib::prelude::*;
-use tsclientlib::{ChannelId, Connection, Identity, Invoker, MessageTarget, StreamItem};
+use tsclientlib::{ChannelId, ClientId, Connection, Identity, Invoker, MessageTarget, StreamItem};
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 use crate::config::Config;
@@ -31,6 +32,9 @@ pub enum TsCmd {
 pub enum TsEvent {
 	Status(TsStatus),
 	Message { target: MessageTarget, invoker: Invoker, text: String },
+	/// Someone joined the bot's channel (not reported for whoever was already
+	/// there when the bot joined or reconnected).
+	Joined { name: String },
 }
 
 pub struct TsChannels {
@@ -129,6 +133,40 @@ async fn run(cfg: Config, mut chans: TsChannels) {
 	}
 }
 
+/// Who is in our channel, to spot newcomers. Whoever is there when we
+/// arrive (connect, reconnect, channel move) is not new, and the client list
+/// can trickle in for a moment after that, hence the grace period.
+struct Members {
+	at: Option<(ClientId, ChannelId)>,
+	since: Instant,
+	ids: HashSet<ClientId>,
+}
+
+impl Members {
+	const GRACE: Duration = Duration::from_secs(5);
+
+	fn new() -> Self { Self { at: None, since: Instant::now(), ids: HashSet::new() } }
+
+	/// Refreshes from the book; returns the names of clients who joined.
+	fn update(&mut self, con: &Connection) -> Vec<String> {
+		let Ok(book) = con.get_state() else { return Vec::new() };
+		let Some(me) = book.clients.get(&book.own_client) else { return Vec::new() };
+		let ids: HashSet<ClientId> = book.clients.values().filter(|c| c.channel == me.channel && c.id != me.id).map(|c| c.id).collect();
+		let at = Some((me.id, me.channel));
+		let joined = if at == self.at && self.since.elapsed() > Self::GRACE {
+			ids.difference(&self.ids).filter_map(|id| book.clients.get(id)).map(|c| c.name.clone()).collect()
+		} else {
+			Vec::new()
+		};
+		if at != self.at {
+			self.at = at;
+			self.since = Instant::now();
+		}
+		self.ids = ids;
+		joined
+	}
+}
+
 fn status_from_book(cfg: &Config, con: &Connection, connected: bool) -> TsStatus {
 	let mut status = TsStatus { connected, server: cfg.ts_address.clone(), channel: None, listeners: 0, users: Vec::new(), error: None };
 	if let Ok(book) = con.get_state() {
@@ -202,6 +240,8 @@ async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
 		let _ = chans.event_tx.try_send(TsEvent::Status(status_from_book(cfg, con, connected)));
 	};
 	send_status(&con, true);
+	let mut members = Members::new();
+	members.update(&con);
 	if !con.can_send_audio() {
 		warn!("bot is muted (talk power / mute flags) — audio will be dropped by the server");
 	}
@@ -248,6 +288,9 @@ async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
 						if status_changed {
 							own_id = con.get_state().ok().map(|b| b.own_client);
 							send_status(&con, true);
+							for name in members.update(&con) {
+								let _ = chans.event_tx.send(TsEvent::Joined { name }).await;
+							}
 						}
 					}
 					Some(Ok(StreamItem::DisconnectedTemporarily(reason))) => {
