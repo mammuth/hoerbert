@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::model::QueueItem;
+use crate::model::{Event, QueueItem};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Persisted {
@@ -14,6 +14,8 @@ pub struct Persisted {
 	pub queue: Vec<QueueItem>,
 	#[serde(default)]
 	pub history: Vec<QueueItem>,
+	#[serde(default)]
+	pub events: Vec<Event>,
 }
 
 pub struct Store {

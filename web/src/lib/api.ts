@@ -15,17 +15,20 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return data as T
 }
 
+/** Who triggered an action, for the history. */
+const by = () => ({ by: store.nick || undefined })
+
 export const api = {
   login: (key: string) => req('POST', '/login', { key }),
   search: (q: string, limit = 10) => req<{ results: Track[] }>('GET', `/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   add: (body: { input?: string; track?: Track; tracks?: Track[]; requested_by?: string; next?: boolean; play_now?: boolean }) =>
     req<{ added: Track[]; playlist?: string }>('POST', '/add', body),
-  player: (action: 'skip' | 'prev' | 'pause' | 'resume' | 'toggle' | 'stop') => req('POST', `/player/${action}`),
+  player: (action: 'skip' | 'prev' | 'pause' | 'resume' | 'toggle' | 'stop') => req('POST', `/player/${action}`, by()),
   seek: (position: number) => req('POST', '/player/seek', { position }),
-  queueClear: () => req('POST', '/queue/clear'),
-  queueRemove: (id: string) => req('POST', `/queue/${id}/remove`),
+  queueClear: () => req('POST', '/queue/clear', by()),
+  queueRemove: (id: string) => req('POST', `/queue/${id}/remove`, by()),
   queueMove: (id: string, to: number) => req('POST', `/queue/${id}/move`, { to }),
   queuePlay: (id: string) => req('POST', `/queue/${id}/play`),
   sounds: () => req<{ sounds: Sound[] }>('GET', '/sounds'),
-  playSound: (slug: string) => req('POST', `/sounds/${encodeURIComponent(slug)}/play`),
+  playSound: (slug: string) => req('POST', `/sounds/${encodeURIComponent(slug)}/play`, by()),
 }

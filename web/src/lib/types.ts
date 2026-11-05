@@ -15,6 +15,8 @@ export interface QueueItem {
   requested_by?: string
   added_at: number
   request?: boolean
+  /** When playback of the item last started (unix ms). */
+  played_at?: number
 }
 
 export interface Sound {
@@ -22,6 +24,13 @@ export interface Sound {
   name: string
   emoji?: string
 }
+
+export type PlayerEvent = { id: string; at: number; by?: string } & (
+  | { kind: 'pause' | 'resume' | 'auto_pause' | 'auto_resume' | 'stop' }
+  | { kind: 'skip' | 'prev' | 'remove'; title: string }
+  | { kind: 'clear'; count: number }
+  | { kind: 'sound'; name: string; emoji?: string }
+)
 
 export interface Segment { start: number; end: number; category: string }
 
@@ -51,6 +60,8 @@ export interface Snapshot {
   playback: Playback
   queue: QueueItem[]
   history: QueueItem[]
+  /** Who did what (pause, skip, soundboard, …), newest first. */
+  events: PlayerEvent[]
   /** Server clock (unix ms) when this message was sent. */
   server_now: number
 }

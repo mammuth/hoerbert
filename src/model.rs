@@ -39,12 +39,50 @@ pub struct QueueItem {
 	/// Individually requested song: plays before playlist/mix tracks.
 	#[serde(default)]
 	pub request: bool,
+	/// Unix millis when playback of the item last started.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub played_at: Option<u64>,
 }
 
 impl QueueItem {
 	pub fn new(track: Track, requested_by: Option<String>) -> Self {
-		Self { id: Uuid::new_v4(), track, requested_by, added_at: now_ms(), request: false }
+		Self { id: Uuid::new_v4(), track, requested_by, added_at: now_ms(), request: false, played_at: None }
 	}
+}
+
+/// Something someone did to the player, shown in the web UI's history next
+/// to the played tracks.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Event {
+	pub id: Uuid,
+	/// Unix millis.
+	pub at: u64,
+	/// Who did it; `None` for the bot itself or an unnamed web user.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub by: Option<String>,
+	#[serde(flatten)]
+	pub kind: EventKind,
+}
+
+impl Event {
+	pub fn new(by: Option<String>, kind: EventKind) -> Self { Self { id: Uuid::new_v4(), at: now_ms(), by, kind } }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EventKind {
+	Pause,
+	Resume,
+	/// Paused because nobody was listening.
+	AutoPause,
+	/// Listeners came back.
+	AutoResume,
+	Skip { title: String },
+	Prev { title: String },
+	Stop,
+	Clear { count: usize },
+	Remove { title: String },
+	Sound { name: String, #[serde(default, skip_serializing_if = "Option::is_none")] emoji: Option<String> },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -99,6 +137,8 @@ pub struct StateSnapshot {
 	pub playback: Playback,
 	pub queue: Vec<QueueItem>,
 	pub history: Vec<QueueItem>,
+	/// Newest first.
+	pub events: Vec<Event>,
 }
 
 pub fn now_ms() -> u64 {

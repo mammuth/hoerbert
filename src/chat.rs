@@ -75,7 +75,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 		"play" | "p" | "add" | "search" | "yt" | "next" | "playnow" => {
 			if arg.is_empty() {
 				if snap.playback.status == PlaybackStatus::Paused {
-					ctx.player.send(Cmd::Resume).await;
+					ctx.player.send_as(Cmd::Resume, who).await;
 					return Some("▶ resumed".into());
 				}
 				return Some(format!("usage: {prefix}play <url or search terms>"));
@@ -101,11 +101,11 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 			}
 		}
 		"skip" | "s" | "n" => {
-			ctx.player.send(Cmd::Skip).await;
+			ctx.player.send_as(Cmd::Skip, who).await;
 			Some("⏭ skipped".into())
 		}
 		"prev" | "back" => {
-			ctx.player.send(Cmd::Prev).await;
+			ctx.player.send_as(Cmd::Prev, who).await;
 			None
 		}
 		"pause" | "resume" => {
@@ -113,10 +113,10 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 				return Some("nothing playing".into());
 			}
 			if snap.playback.status == PlaybackStatus::Paused {
-				ctx.player.send(Cmd::Resume).await;
+				ctx.player.send_as(Cmd::Resume, who).await;
 				return Some("▶ resumed".into());
 			}
-			ctx.player.send(Cmd::Pause).await;
+			ctx.player.send_as(Cmd::Pause, who).await;
 			Some("⏸ paused".into())
 		}
 		"now" | "status" => Some(now_playing(&snap)),
@@ -141,7 +141,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 			Some(s)
 		}
 		"clear" => {
-			ctx.player.send(Cmd::Clear).await;
+			ctx.player.send_as(Cmd::Clear, who).await;
 			Some("🗑 queue cleared".into())
 		}
 		"link" | "web" | "ui" => Some(match ctx.cfg.web_link() {
@@ -162,7 +162,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 		// Built-in commands above win over sounds with the same slug.
 		slug => {
 			let sound = ctx.soundboard.get(slug)?;
-			ctx.player.send(Cmd::PlaySound { url: sound.url, volume: sound.volume }).await;
+			ctx.player.send_as(Cmd::PlaySound(sound), who).await;
 			None
 		}
 	}

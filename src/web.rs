@@ -116,6 +116,17 @@ fn requester(r: Option<String>) -> Result<String, ApiError> {
 	r.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).ok_or_else(|| bad("enter your name before adding songs"))
 }
 
+/// Optional `{"by": "name"}` body of player actions, for the history's event log.
+#[derive(Deserialize)]
+struct ByBody {
+	#[serde(default)]
+	by: Option<String>,
+}
+
+fn actor(body: Option<Json<ByBody>>) -> Option<String> {
+	body.and_then(|Json(b)| b.by).map(|b| b.trim().to_string()).filter(|b| !b.is_empty())
+}
+
 fn not_found() -> ApiError { ApiError(StatusCode::NOT_FOUND, "not found".into()) }
 fn ok() -> ApiResult { Ok(Json(json!({ "ok": true })).into_response()) }
 
@@ -288,7 +299,7 @@ async fn add(State(s): State<AppState>, Json(body): Json<AddBody>) -> ApiResult 
 
 // ------------------------------------------------------------------ player
 
-async fn player_action(State(s): State<AppState>, Path(action): Path<String>) -> ApiResult {
+async fn player_action(State(s): State<AppState>, Path(action): Path<String>, body: Option<Json<ByBody>>) -> ApiResult {
 	let cmd = match action.as_str() {
 		"skip" => Cmd::Skip,
 		"prev" => Cmd::Prev,
@@ -298,7 +309,7 @@ async fn player_action(State(s): State<AppState>, Path(action): Path<String>) ->
 		"stop" => Cmd::Stop,
 		_ => return Err(not_found()),
 	};
-	s.player.send(cmd).await;
+	s.player.send_as(cmd, actor(body)).await;
 	ok()
 }
 
@@ -313,12 +324,12 @@ async fn seek(State(s): State<AppState>, Json(b): Json<SeekBody>) -> ApiResult {
 
 // ------------------------------------------------------------------- queue
 
-async fn queue_clear(State(s): State<AppState>) -> ApiResult {
-	s.player.send(Cmd::Clear).await;
+async fn queue_clear(State(s): State<AppState>, body: Option<Json<ByBody>>) -> ApiResult {
+	s.player.send_as(Cmd::Clear, actor(body)).await;
 	ok()
 }
-async fn queue_remove(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
-	s.player.send(Cmd::Remove(id)).await;
+async fn queue_remove(State(s): State<AppState>, Path(id): Path<Uuid>, body: Option<Json<ByBody>>) -> ApiResult {
+	s.player.send_as(Cmd::Remove(id), actor(body)).await;
 	ok()
 }
 #[derive(Deserialize)]
@@ -339,8 +350,8 @@ async fn queue_play(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResul
 async fn sounds(State(s): State<AppState>) -> Response {
 	Json(json!({ "sounds": s.soundboard.list() })).into_response()
 }
-async fn sound_play(State(s): State<AppState>, Path(slug): Path<String>) -> ApiResult {
+async fn sound_play(State(s): State<AppState>, Path(slug): Path<String>, body: Option<Json<ByBody>>) -> ApiResult {
 	let sound = s.soundboard.get(&slug.to_ascii_lowercase()).ok_or_else(not_found)?;
-	s.player.send(Cmd::PlaySound { url: sound.url, volume: sound.volume }).await;
+	s.player.send_as(Cmd::PlaySound(sound), actor(body)).await;
 	ok()
 }

@@ -17,11 +17,13 @@ use crate::audio::{Decoder, Frame, Pull, FRAME_LEN};
 use crate::config::Config;
 use crate::model::*;
 use crate::resolver::{Resolver, StreamInfo};
+use crate::soundboard::Sound;
 use crate::sponsorblock;
 use crate::store::{Persisted, Store};
 use crate::ts::{AudioOut, TsCmd};
 
 const HISTORY_MAX: usize = 50;
+const EVENTS_MAX: usize = 100;
 /// Stop instead of skipping after this many unresolvable tracks in a row.
 const MAX_RESOLVE_FAILURES: u32 = 3;
 /// Ticks later than this count as late (risk of audible jitter).
@@ -46,19 +48,22 @@ pub enum Cmd {
 	PlayItem(Uuid),
 	Clear,
 	TsStatus(TsStatus),
-	/// Soundboard clip (ffmpeg input), mixed over the music.
-	PlaySound { url: String, volume: f32 },
+	/// Soundboard clip, mixed over the music.
+	PlaySound(Sound),
 }
 
 #[derive(Clone)]
 pub struct PlayerHandle {
-	cmd_tx: mpsc::Sender<Cmd>,
+	cmd_tx: mpsc::Sender<(Cmd, Option<String>)>,
 	state_rx: watch::Receiver<Arc<StateSnapshot>>,
 }
 
 impl PlayerHandle {
-	pub async fn send(&self, cmd: Cmd) {
-		if self.cmd_tx.send(cmd).await.is_err() {
+	pub async fn send(&self, cmd: Cmd) { self.send_as(cmd, None).await }
+
+	/// `by`: who triggered the command, for the history's event log.
+	pub async fn send_as(&self, cmd: Cmd, by: Option<String>) {
+		if self.cmd_tx.send((cmd, by)).await.is_err() {
 			error!("player actor is gone");
 		}
 	}
@@ -120,6 +125,8 @@ pub struct Player {
 	http: reqwest::Client,
 	queue: Vec<QueueItem>,
 	history: Vec<QueueItem>,
+	/// Newest first.
+	events: Vec<Event>,
 	current: Option<Current>,
 	/// Soundboard clip currently playing.
 	sfx: Option<Decoder>,
@@ -170,6 +177,7 @@ pub fn spawn(
 		volume: cfg.default_volume.clamp(0.0, 1.5),
 		queue: persisted.queue,
 		history: persisted.history,
+		events: persisted.events,
 		cfg,
 		store,
 		resolver,
@@ -216,11 +224,12 @@ fn empty_snapshot() -> StateSnapshot {
 		},
 		queue: vec![],
 		history: vec![],
+		events: vec![],
 	}
 }
 
 impl Player {
-	async fn run(mut self, mut cmd_rx: mpsc::Receiver<Cmd>, mut load_rx: mpsc::Receiver<LoadResult>) {
+	async fn run(mut self, mut cmd_rx: mpsc::Receiver<(Cmd, Option<String>)>, mut load_rx: mpsc::Receiver<LoadResult>) {
 		let mut tick = tokio::time::interval(Duration::from_millis(20));
 		tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
 		// Start idle: the restored queue waits for an explicit play.
@@ -236,8 +245,8 @@ impl Player {
 			ticking = needs_tick;
 			tokio::select! {
 				t = tick.tick(), if needs_tick => self.on_tick(t.elapsed()).await,
-				Some(cmd) = cmd_rx.recv() => {
-					self.handle(cmd).await;
+				Some((cmd, by)) = cmd_rx.recv() => {
+					self.handle(cmd, by).await;
 					// The queue head may have changed (request added, moved…).
 					if self.current.is_some() {
 						self.prefetch_next();
@@ -265,6 +274,7 @@ impl Player {
 		let data = Persisted {
 			queue: self.queue.clone(),
 			history: self.history.clone(),
+			events: self.events.clone(),
 		};
 		if let Err(e) = self.store.save(&data) {
 			error!(error = %e, "failed to persist state");
@@ -298,6 +308,7 @@ impl Player {
 			playback,
 			queue: self.queue.clone(),
 			history: self.history.clone(),
+			events: self.events.clone(),
 		}
 	}
 
@@ -310,7 +321,13 @@ impl Player {
 
 	// ---------------------------------------------------------------- commands
 
-	async fn handle(&mut self, cmd: Cmd) {
+	fn log(&mut self, by: Option<String>, kind: EventKind) {
+		self.events.insert(0, Event::new(by, kind));
+		self.events.truncate(EVENTS_MAX);
+		self.dirty = true;
+	}
+
+	async fn handle(&mut self, cmd: Cmd, by: Option<String>) {
 		// Someone is using the bot: give them a fresh grace period before auto-pause.
 		if !matches!(cmd, Cmd::TsStatus(_)) && self.empty_since.is_some() {
 			self.empty_since = Some(Instant::now());
@@ -344,15 +361,16 @@ impl Player {
 				}
 			}
 			Cmd::Skip => {
-				if self.current.is_some() {
-					self.finish_current().await;
-					self.start_next().await;
-				} else {
-					self.start_next().await;
+				if let Some(c) = &self.current {
+					let title = c.item.track.title.clone();
+					self.log(by, EventKind::Skip { title });
 				}
+				self.finish_current().await;
+				self.start_next().await;
 			}
 			Cmd::Prev => {
 				if let Some(prev) = (!self.history.is_empty()).then(|| self.history.remove(0)) {
+					self.log(by, EventKind::Prev { title: prev.track.title.clone() });
 					if let Some(c) = self.current.take() {
 						if let Some(d) = c.decoder {
 							d.kill().await;
@@ -366,22 +384,43 @@ impl Player {
 					self.seek(0.0);
 				}
 			}
-			Cmd::Pause => self.set_paused(true),
-			Cmd::Resume if self.current.is_none() => self.start_next().await,
-			Cmd::Resume => self.set_paused(false),
-			Cmd::Toggle => {
-				let paused = matches!(self.current.as_ref().map(|c| c.status), Some(PlaybackStatus::Paused));
-				if self.current.is_none() {
-					self.start_next().await;
-				} else {
-					self.set_paused(!paused);
+			Cmd::Pause | Cmd::Resume | Cmd::Toggle => {
+				let status = self.current.as_ref().map(|c| c.status);
+				let pause = match cmd {
+					Cmd::Pause => true,
+					Cmd::Resume => false,
+					_ => status.is_some_and(|s| s != PlaybackStatus::Paused),
+				};
+				match status {
+					None if !pause => {
+						if !self.queue.is_empty() {
+							self.log(by, EventKind::Resume);
+						}
+						self.start_next().await;
+					}
+					None => {}
+					Some(s) => {
+						if pause && s == PlaybackStatus::Playing {
+							self.log(by, EventKind::Pause);
+						} else if !pause && s == PlaybackStatus::Paused {
+							self.log(by, EventKind::Resume);
+						}
+						self.set_paused(pause);
+					}
 				}
 			}
-			Cmd::Stop => self.stop().await,
+			Cmd::Stop => {
+				if self.current.is_some() {
+					self.log(by, EventKind::Stop);
+				}
+				self.stop().await;
+			}
 			Cmd::Seek(pos) => self.seek(pos),
 			Cmd::Remove(id) => {
-				self.queue.retain(|i| i.id != id);
-				self.dirty = true;
+				if let Some(idx) = self.queue.iter().position(|i| i.id == id) {
+					let item = self.queue.remove(idx);
+					self.log(by, EventKind::Remove { title: item.track.title });
+				}
 			}
 			Cmd::Move { id, to } => {
 				if let Some(from) = self.queue.iter().position(|i| i.id == id) {
@@ -400,19 +439,23 @@ impl Player {
 				}
 			}
 			Cmd::Clear => {
+				if !self.queue.is_empty() {
+					self.log(by, EventKind::Clear { count: self.queue.len() });
+				}
 				self.queue.clear();
 				self.dirty = true;
 			}
-			Cmd::PlaySound { url, volume } => {
+			Cmd::PlaySound(sound) => {
 				// A new clip replaces the one still playing.
 				if let Some(d) = self.sfx.take() {
 					tokio::spawn(d.kill());
 				}
-				let stream = StreamInfo { url, headers: HashMap::new(), is_live: false, duration: None, direct: true, available_at: None };
+				let stream = StreamInfo { url: sound.url, headers: HashMap::new(), is_live: false, duration: None, direct: true, available_at: None };
 				match Decoder::spawn_url(&self.cfg, &stream, 0.0) {
 					Ok(d) => {
 						self.sfx = Some(d);
-						self.sfx_gain = self.cfg.soundboard_volume * volume;
+						self.sfx_gain = self.cfg.soundboard_volume * sound.volume;
+						self.log(by, EventKind::Sound { name: sound.name, emoji: sound.emoji });
 					}
 					Err(e) => warn!(error = %e, url = %stream.url, "could not start sound"),
 				}
@@ -429,6 +472,7 @@ impl Player {
 					let paused = self.current.as_ref().is_some_and(|c| c.status == PlaybackStatus::Paused);
 					if moved && self.current.is_none() && !self.queue.is_empty() {
 						info!("moved to listeners, starting queue");
+						self.log(None, EventKind::AutoResume);
 						self.start_next().await;
 						if let Some(c) = &self.current {
 							self.announce(format!("Starting the queue: {} (type {}help to control me)", c.item.track.title, self.cfg.command_prefix));
@@ -436,6 +480,7 @@ impl Player {
 					} else if self.auto_paused || (moved && paused) {
 						info!(moved, "listeners are here, resuming");
 						self.set_paused(false);
+						self.log(None, EventKind::AutoResume);
 						if let Some(c) = &self.current {
 							self.announce(format!("Resuming: {} (type {}help to control me)", c.item.track.title, self.cfg.command_prefix));
 						}
@@ -496,6 +541,7 @@ impl Player {
 		let decoder = c.decoder.take();
 		self.set_paused(true);
 		self.auto_paused = true;
+		self.log(None, EventKind::AutoPause);
 		self.announce(msg);
 		if let Some(d) = decoder {
 			d.kill().await;
@@ -550,7 +596,8 @@ impl Player {
 			let _ = self.audio_tx.try_send(AudioOut::End);
 			return;
 		}
-		let item = self.queue.remove(0);
+		let mut item = self.queue.remove(0);
+		item.played_at = Some(now_ms());
 		self.dirty = true;
 		self.gen_counter += 1;
 		let gen = self.gen_counter;
