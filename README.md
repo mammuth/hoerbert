@@ -33,7 +33,8 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `TS_CHANNEL` | server default | channel path to join, e.g. `Lounge/Music` |
 | `TS_CHANNEL_PASSWORD`, `TS_SERVER_PASSWORD` | — | passwords, if any |
 | `WEB_BIND` | `0.0.0.0:8080` | where the web UI listens |
-| `PUBLIC_URL` | — | URL shown by `!link` / `!help` |
+| `PUBLIC_URL` | — | URL shown by `!link` / `!help` (includes the key) |
+| `WEB_KEY` | generated | web UI key; if unset, a 5-letter key is generated and saved in `DATA_DIR/web_key` |
 | `DEFAULT_VOLUME` | `0.1` | playback volume, 0.0 – 1.5 (fixed, no UI control) |
 | `OPUS_BITRATE` | `128000` | Opus encoder bitrate |
 | `SPONSORBLOCK` | `true` | skip SponsorBlock segments on YouTube |
@@ -47,8 +48,10 @@ Everything is an environment variable, see [`.env.example`](.env.example):
 | `DATA_DIR` | `data` | state + identity |
 | `RUST_LOG` | `info,hoerbert=debug` | log filter |
 
-The web UI has no login. Run it on your LAN or behind a reverse proxy with
-auth if the port is reachable from the internet.
+The web UI is locked behind a short key. `!help` posts a link with the key
+(`PUBLIC_URL/?key=…`); opening it stores the key in a cookie. The key can also
+be typed into the page. Wrong guesses are throttled to one per second. This
+keeps strangers out, but it is not strong security.
 
 ### Chat commands
 

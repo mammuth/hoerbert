@@ -56,9 +56,10 @@ async fn main() -> Result<()> {
 		ts_event_rx,
 	));
 
-	let app = web::router(web::AppState { player, resolver, soundboard });
+	let app = web::router(web::AppState { player, resolver, soundboard, auth: web::Auth::new(cfg.web_key.clone()) });
 	let listener = tokio::net::TcpListener::bind(&cfg.web_bind).await.with_context(|| format!("binding {}", cfg.web_bind))?;
 	info!("web ui listening on http://{}", cfg.web_bind);
+	info!(key = %cfg.web_key, link = cfg.web_link().as_deref().unwrap_or("(set PUBLIC_URL)"), "web ui key");
 	axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
 	// Leave TeamSpeak politely so the server frees our client slot right away.
 	let _ = shutdown_tx.send(true);

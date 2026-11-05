@@ -3,6 +3,7 @@
   import AddBar from './lib/AddBar.svelte'
   import History from './lib/History.svelte'
   import Icon from './lib/Icon.svelte'
+  import KeyGate from './lib/KeyGate.svelte'
   import NowPlaying from './lib/NowPlaying.svelte'
   import Queue from './lib/Queue.svelte'
   import Soundboard from './lib/Soundboard.svelte'
@@ -15,48 +16,52 @@
   const ts = $derived(store.snap?.ts)
 </script>
 
-<div class="shell">
-  <header class="top">
-    <div class="brand">
-      <span class="logo"><span class="disc"></span></span>
-      <h1>Hörbert</h1>
-      <span class="tag">shared TeamSpeak jukebox</span>
-    </div>
-    <div class="status">
-      {#if !store.connected}
-        <span class="pill off"><span class="dot"></span> reconnecting…</span>
-      {:else if ts?.connected}
-        <span class="pill on" title={[ts.server, ...ts.users].join('\n')}>
-          <span class="dot"></span>
-          {ts.channel ?? 'connected'}
-          <span class="sep">·</span>
-          {ts.listeners} listening
-        </span>
-      {:else}
-        <span class="pill off" title={ts?.error ?? ''}><span class="dot"></span> TeamSpeak offline</span>
-      {/if}
-    </div>
-  </header>
+{#if store.locked}
+  <KeyGate />
+{:else}
+  <div class="shell">
+    <header class="top">
+      <div class="brand">
+        <span class="logo"><span class="disc"></span></span>
+        <h1>Hörbert</h1>
+        <span class="tag">shared TeamSpeak jukebox</span>
+      </div>
+      <div class="status">
+        {#if !store.connected}
+          <span class="pill off"><span class="dot"></span> reconnecting…</span>
+        {:else if ts?.connected}
+          <span class="pill on" title={[ts.server, ...ts.users].join('\n')}>
+            <span class="dot"></span>
+            {ts.channel ?? 'connected'}
+            <span class="sep">·</span>
+            {ts.listeners} listening
+          </span>
+        {:else}
+          <span class="pill off" title={ts?.error ?? ''}><span class="dot"></span> TeamSpeak offline</span>
+        {/if}
+      </div>
+    </header>
 
-  <main>
-    <div class="col main-col">
-      <NowPlaying />
-      <AddBar />
-      <Queue />
-    </div>
-    <aside class="col side" id="side">
-      <Soundboard />
-      <section class="card history rise" style="animation-delay: 240ms">
-        <h3 class="side-title"><Icon name="history" size={16} /> History</h3>
-        <History />
-      </section>
-    </aside>
-  </main>
+    <main>
+      <div class="col main-col">
+        <NowPlaying />
+        <AddBar />
+        <Queue />
+      </div>
+      <aside class="col side" id="side">
+        <Soundboard />
+        <section class="card history rise" style="animation-delay: 240ms">
+          <h3 class="side-title"><Icon name="history" size={16} /> History</h3>
+          <History />
+        </section>
+      </aside>
+    </main>
 
-  <footer class="faint">
-    chat commands in TeamSpeak: <span class="mono">!play &lt;link or search&gt;</span> · <span class="mono">!skip</span> · <span class="mono">!pause</span> · <span class="mono">!queue</span> · <span class="mono">!help</span>
-  </footer>
-</div>
+    <footer class="faint">
+      chat commands in TeamSpeak: <span class="mono">!play &lt;link or search&gt;</span> · <span class="mono">!skip</span> · <span class="mono">!pause</span> · <span class="mono">!queue</span> · <span class="mono">!help</span>
+    </footer>
+  </div>
+{/if}
 
 <div class="toasts">
   {#each store.toasts as t (t.id)}

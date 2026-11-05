@@ -1,8 +1,9 @@
 //! Configuration from environment variables (12-factor, docker friendly).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
+use rand::Rng;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -13,6 +14,8 @@ pub struct Config {
 	pub ts_server_password: Option<String>,
 	pub web_bind: String,
 	pub public_url: Option<String>,
+	/// Shared secret for the web UI, handed out via the `!help` link.
+	pub web_key: String,
 	pub data_dir: PathBuf,
 	pub ytdlp_bin: String,
 	pub ffmpeg_bin: String,
@@ -46,6 +49,13 @@ impl Config {
 			.filter(|s| !s.is_empty())
 			.collect();
 		let data_dir = env("DATA_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data"));
+		let web_key = match env("WEB_KEY") {
+			Some(k) => k,
+			None => load_or_create_web_key(&data_dir)?,
+		};
+		if !web_key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+			bail!("WEB_KEY may only contain letters, digits, '-' and '_'");
+		}
 		Ok(Self {
 			ts_address,
 			ts_name: env("TS_NAME").unwrap_or_else(|| "Hörbert".into()),
@@ -54,6 +64,7 @@ impl Config {
 			ts_server_password: env("TS_SERVER_PASSWORD"),
 			web_bind: env("WEB_BIND").unwrap_or_else(|| "0.0.0.0:8080".into()),
 			public_url: env("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string()),
+			web_key,
 			soundboard_file: env("SOUNDBOARD_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("sounds.json")),
 			soundboard_volume: env("SOUNDBOARD_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(5.0),
 			data_dir,
@@ -68,6 +79,31 @@ impl Config {
 			help_suffix: env("HELP_SUFFIX").map(|s| s.replace("\\n", "\n")),
 		})
 	}
+}
+
+impl Config {
+	/// Public web UI link that also unlocks it.
+	pub fn web_link(&self) -> Option<String> {
+		self.public_url.as_ref().map(|u| format!("{u}/?key={}", self.web_key))
+	}
+}
+
+/// Short and readable rather than secure: guesses are throttled server-side.
+/// Leaves out l and o, which read like 1 and 0.
+fn load_or_create_web_key(data_dir: &Path) -> Result<String> {
+	let path = data_dir.join("web_key");
+	if let Ok(k) = std::fs::read_to_string(&path) {
+		let k = k.trim();
+		if !k.is_empty() {
+			return Ok(k.to_string());
+		}
+	}
+	const ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz";
+	let mut rng = rand::rng();
+	let key: String = (0..5).map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char).collect();
+	std::fs::create_dir_all(data_dir).with_context(|| format!("creating data dir {}", data_dir.display()))?;
+	std::fs::write(&path, &key).with_context(|| format!("writing {}", path.display()))?;
+	Ok(key)
 }
 
 /// Minimal shell-like splitting (supports double/single quotes).

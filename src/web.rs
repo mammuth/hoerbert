@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
-use axum::http::{header, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{header, HeaderMap, StatusCode, Uri};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rust_embed::Embed;
@@ -28,6 +29,70 @@ pub struct AppState {
 	pub player: PlayerHandle,
 	pub resolver: Resolver,
 	pub soundboard: Soundboard,
+	pub auth: Auth,
+}
+
+// -------------------------------------------------------------------- auth
+
+const COOKIE: &str = "hoerbert_key";
+/// Browsers cap cookie lifetime at 400 days; we renew it on every page load.
+const COOKIE_MAX_AGE: u32 = 400 * 24 * 3600;
+
+/// Shared web key. Wrong guesses are serialized and slowed to one per second,
+/// which is what makes a short key good enough.
+#[derive(Clone)]
+pub struct Auth {
+	key: Arc<str>,
+	guesses: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Auth {
+	pub fn new(key: String) -> Self { Self { key: key.into(), guesses: Default::default() } }
+
+	async fn check(&self, candidate: &str) -> bool {
+		if candidate == &*self.key {
+			return true;
+		}
+		let _turn = self.guesses.lock().await;
+		tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+		false
+	}
+
+	fn cookie(&self) -> String {
+		format!("{COOKIE}={}; Path=/; Max-Age={COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax", self.key)
+	}
+}
+
+fn cookie_key(headers: &HeaderMap) -> Option<String> {
+	headers
+		.get_all(header::COOKIE)
+		.iter()
+		.filter_map(|v| v.to_str().ok())
+		.flat_map(|v| v.split(';'))
+		.find_map(|c| c.trim().strip_prefix(COOKIE)?.strip_prefix('=').map(str::to_owned))
+}
+
+async fn require_key(State(s): State<AppState>, req: Request, next: Next) -> Response {
+	let ok = match cookie_key(req.headers()) {
+		Some(k) => s.auth.check(&k).await,
+		None => false,
+	};
+	if !ok {
+		return ApiError(StatusCode::UNAUTHORIZED, "key required".into()).into_response();
+	}
+	next.run(req).await
+}
+
+#[derive(Deserialize)]
+struct LoginBody {
+	key: String,
+}
+
+async fn login(State(s): State<AppState>, Json(b): Json<LoginBody>) -> ApiResult {
+	if !s.auth.check(b.key.trim()).await {
+		return Err(ApiError(StatusCode::UNAUTHORIZED, "wrong key".into()));
+	}
+	Ok(([(header::SET_COOKIE, s.auth.cookie())], Json(json!({ "ok": true }))).into_response())
 }
 
 type ApiResult = Result<Response, ApiError>;
@@ -67,7 +132,9 @@ pub fn router(state: AppState) -> Router {
 		.route("/queue/{id}/move", post(queue_move))
 		.route("/queue/{id}/play", post(queue_play))
 		.route("/sounds", get(sounds))
-		.route("/sounds/{slug}/play", post(sound_play));
+		.route("/sounds/{slug}/play", post(sound_play))
+		.route_layer(middleware::from_fn_with_state(state.clone(), require_key))
+		.route("/login", post(login));
 	Router::new()
 		.nest("/api", api)
 		.fallback(static_handler)
@@ -77,8 +144,28 @@ pub fn router(state: AppState) -> Router {
 
 // ------------------------------------------------------------------ static
 
-async fn static_handler(uri: Uri) -> Response {
+async fn static_handler(State(s): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
+	// `?key=…` magic link: store the key, then drop it from the address bar.
+	let key_param = uri.query().and_then(|q| url::form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == "key").map(|(_, v)| v.into_owned()));
+	if let Some(k) = key_param {
+		let to = Redirect::to(uri.path());
+		return match s.auth.check(&k).await {
+			true => ([(header::SET_COOKIE, s.auth.cookie())], to).into_response(),
+			false => to.into_response(),
+		};
+	}
 	let path = uri.path().trim_start_matches('/');
+	let mut res = serve_asset(path);
+	// Renew a valid cookie on page loads so it effectively never expires.
+	if path.is_empty() && cookie_key(&headers).is_some_and(|k| *k == *s.auth.key) {
+		if let Ok(v) = s.auth.cookie().parse() {
+			res.headers_mut().insert(header::SET_COOKIE, v);
+		}
+	}
+	res
+}
+
+fn serve_asset(path: &str) -> Response {
 	let path = match path {
 		"" => "index.html",
 		"favicon.ico" => "favicon.svg", // browsers probe this regardless of <link rel=icon>

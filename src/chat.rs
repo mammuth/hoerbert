@@ -70,7 +70,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 	match cmd.as_str() {
 		"help" | "h" | "?" => {
 			let has_sounds = !ctx.soundboard.list().is_empty();
-			Some(help(prefix, ctx.cfg.public_url.as_deref(), ctx.cfg.help_suffix.as_deref(), has_sounds))
+			Some(help(prefix, ctx.cfg.web_link().as_deref(), ctx.cfg.help_suffix.as_deref(), has_sounds))
 		}
 		"play" | "p" | "add" | "search" | "yt" | "next" | "playnow" => {
 			if arg.is_empty() {
@@ -144,7 +144,7 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 			ctx.player.send(Cmd::Clear).await;
 			Some("🗑 queue cleared".into())
 		}
-		"link" | "web" | "ui" => Some(match &ctx.cfg.public_url {
+		"link" | "web" | "ui" => Some(match ctx.cfg.web_link() {
 			Some(u) => format!("🎛 {u}"),
 			None => "web ui url not configured (PUBLIC_URL)".into(),
 		}),

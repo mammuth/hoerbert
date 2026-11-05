@@ -3,6 +3,8 @@ import type { Snapshot } from './types'
 class Store {
   snap = $state<Snapshot | null>(null)
   connected = $state(false)
+  /** No valid key cookie: show the key form instead of the app. */
+  locked = $state(false)
   now = $state(Date.now())
   nick = $state<string>('')
   toasts = $state<{ id: number; text: string; kind: 'info' | 'error' }[]>([])
@@ -33,7 +35,12 @@ class Store {
     return dur ? Math.min(pos, dur) : pos
   }
 
-  connect() {
+  async connect() {
+    // A WebSocket can't report a 401, so ask the API first.
+    try {
+      if ((await fetch('/api/state')).status === 401) { this.locked = true; return }
+    } catch {}
+    this.locked = false
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${location.host}/api/ws`)
     this.ws = ws

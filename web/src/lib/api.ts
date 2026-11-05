@@ -1,3 +1,4 @@
+import { store } from './store.svelte'
 import type { Sound, Track } from './types'
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -9,11 +10,13 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   const text = await res.text()
   let data: any = null
   try { data = text ? JSON.parse(text) : null } catch { data = { error: text } }
+  if (res.status === 401) store.locked = true
   if (!res.ok) throw new Error(data?.error ?? `${res.status} ${res.statusText}`)
   return data as T
 }
 
 export const api = {
+  login: (key: string) => req('POST', '/login', { key }),
   search: (q: string, limit = 10) => req<{ results: Track[] }>('GET', `/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   add: (body: { input?: string; track?: Track; tracks?: Track[]; requested_by?: string; next?: boolean; play_now?: boolean }) =>
     req<{ added: Track[]; playlist?: string }>('POST', '/add', body),
