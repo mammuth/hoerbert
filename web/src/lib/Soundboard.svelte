@@ -12,9 +12,8 @@
   let voice = $state<string | undefined>(undefined)
   let saying = $state(false)
 
-  /** espeak-ng voices worth a laugh; `+x` is a variant of the server's language. */
+  /** espeak-ng voices worth a laugh; `+x` is a variant of the server's language. None picked: the default voice. */
   const voices = [
-    { id: undefined, label: 'Hörbert', emoji: '🤖' },
     { id: 'de', label: 'Deutsch', emoji: '🇩🇪' },
     { id: '+whisper', label: 'Whisper', emoji: '🤫' },
     { id: '+croak', label: 'Croak', emoji: '🐸' },
@@ -55,9 +54,9 @@
           <input type="text" bind:value={text} maxlength={tts.max_chars} placeholder="Make Hörbert say something…" aria-label="Text to say" />
           <button class="primary" disabled={!text.trim() || saying}>🗣️ Say</button>
         </div>
-        <div class="voices" role="radiogroup" aria-label="Voice">
+        <div class="voices" role="group" aria-label="Voice">
           {#each voices as v (v.label)}
-            <button type="button" role="radio" aria-checked={voice === v.id} class="chip" class:active={voice === v.id} onclick={() => { voice = v.id }}>
+            <button type="button" aria-pressed={voice === v.id} class="chip" class:active={voice === v.id} onclick={() => { voice = voice === v.id ? undefined : v.id }}>
               {v.emoji} {v.label}
             </button>
           {/each}
@@ -102,8 +101,8 @@
   .say:last-child { margin-bottom: 0; }
   .row { display: flex; gap: 8px; }
   .row input { min-width: 0; }
-  .voices { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip { padding: 5px 9px; font-size: 12px; border-radius: 999px; background: transparent; color: var(--muted); }
+  .voices { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+  .chip { flex-shrink: 0; padding: 5px 9px; font-size: 12px; border-radius: 999px; background: transparent; color: var(--muted); }
   .chip.active { color: var(--accent); background: rgba(255, 122, 26, 0.1); }
   @keyframes thump {
     0% { transform: scale(0.9); border-color: var(--accent); box-shadow: 0 0 0 0 rgba(255, 122, 26, 0.55); }
