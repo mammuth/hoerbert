@@ -41,7 +41,10 @@
     saying = true
     const ok = await store.runAs((who) => api.say(text, voice, who).then(() => true))
     saying = false
-    if (ok) text = ''
+    if (ok) {
+      text = ''
+      voice = undefined
+    }
   }
 </script>
 
