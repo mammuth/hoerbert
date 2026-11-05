@@ -15,7 +15,7 @@
   /** espeak-ng voices worth a laugh; `+x` is a variant of the server's language. */
   const voices = [
     { id: undefined, label: 'Hörbert', emoji: '🤖' },
-    { id: 'en', label: 'English', emoji: '🇬🇧' },
+    { id: 'de', label: 'Deutsch', emoji: '🇩🇪' },
     { id: '+whisper', label: 'Whisper', emoji: '🤫' },
     { id: '+croak', label: 'Croak', emoji: '🐸' },
     { id: '+demonic', label: 'Demon', emoji: '😈' },
