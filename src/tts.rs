@@ -4,7 +4,7 @@
 //! Voices are espeak-ng languages with an optional variant: `en`, `de+klatt`,
 //! or just `+whisper` for a variant of the default language.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -31,8 +31,8 @@ pub struct Speech {
 #[derive(Clone)]
 pub struct Tts {
 	cfg: Config,
-	/// Lowercase espeak-ng languages and variants; `None`: TTS is off.
-	voices: Option<Arc<(HashSet<String>, HashSet<String>)>>,
+	/// espeak-ng languages and variants by lowercase name; `None`: TTS is off.
+	voices: Option<Arc<(Voices, Voices)>>,
 	/// Last message per user, for the cooldown.
 	last: Arc<Mutex<HashMap<String, Instant>>>,
 }
@@ -101,20 +101,26 @@ impl Tts {
 			Some((l, var)) => (l.to_string(), Some(var)),
 			None => (v.clone(), None),
 		};
-		if !langs.contains(&lang) {
+		if !langs.contains_key(&lang) {
 			return Err(TtsError::Invalid(format!("unknown language {lang}")));
 		}
 		Ok(match variant {
-			Some(var) if variants.contains(var) => format!("{lang}+{var}"),
-			Some(var) => return Err(TtsError::Invalid(format!("unknown voice +{var}"))),
+			// Variant names are case-sensitive (`Demonic`); a wrong case silently falls back to the plain voice.
+			Some(var) => match variants.get(var) {
+				Some(name) => format!("{lang}+{name}"),
+				None => return Err(TtsError::Invalid(format!("unknown voice +{var}"))),
+			},
 			None => lang,
 		})
 	}
 }
 
-/// Language codes (`de`, `en-us`) or variant names (`whisper`) from
-/// `espeak-ng --voices[=variant]`, lowercase.
-fn list_voices(bin: &str, arg: &str) -> Option<HashSet<String>> {
+/// Lowercase name → name as espeak-ng spells it.
+type Voices = HashMap<String, String>;
+
+/// Language codes (`de`, `en-us`) or variant names (`whisper`, `Demonic`)
+/// from `espeak-ng --voices[=variant]`.
+fn list_voices(bin: &str, arg: &str) -> Option<Voices> {
 	let out = std::process::Command::new(bin).arg(arg).output().ok().filter(|o| o.status.success())?;
 	let names = String::from_utf8_lossy(&out.stdout)
 		.lines()
@@ -127,7 +133,7 @@ fn list_voices(bin: &str, arg: &str) -> Option<HashSet<String>> {
 				Some(variant) => vec![variant],
 				None => cols.get(1).into_iter().copied().chain(cols.iter().skip(5).filter_map(|c| c.strip_prefix('('))).collect(),
 			};
-			names.into_iter().map(str::to_lowercase).collect::<Vec<_>>()
+			names.into_iter().map(|n| (n.to_lowercase(), n.to_string())).collect::<Vec<_>>()
 		})
 		.collect();
 	Some(names)
@@ -151,5 +157,12 @@ mod tests {
 	fn cleans_links_and_length() {
 		assert_eq!(clean("  hi\n https://x.y/z  www.foo.de  ok ", 100), "hi link link ok");
 		assert_eq!(clean("abcdef", 3), "abc");
+	}
+
+	#[test]
+	fn keeps_variant_case() {
+		let Some(variants) = list_voices("espeak-ng", "--voices=variant") else { return }; // no espeak-ng
+		assert_eq!(variants.get("demonic").map(String::as_str), Some("Demonic"));
+		assert_eq!(variants.get("croak").map(String::as_str), Some("croak"));
 	}
 }
