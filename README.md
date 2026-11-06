@@ -106,7 +106,8 @@ on one core).
 <summary>Details</summary>
 
 - Messages queue up instead of cutting each other off.
-- The music gets quieter while the bot talks (`TTS_DUCK`).
+- The music gets quieter while the bot talks (`TTS_DUCK`), and speech is
+  compressed and limited so it stays clear over it without distorting.
 - Links are read as "link".
 - Each user waits `TTS_COOLDOWN` seconds between messages.
 - Voices are baked into the image. Pick others (or more languages) from the
@@ -122,7 +123,8 @@ on one core).
 ### Greetings
 
 When someone joins the bot's channel, it says a random greeting from
-`./data/greetings.json`. The file is created with a dozen defaults on first start;
+`./data/greetings.json`, louder than other speech and with the music almost muted
+(`GREET_VOLUME`, `GREET_DUCK`). The file is created with ten defaults on first start;
 add your own. `GREET=false` turns greetings off.
 
 ```json
@@ -186,6 +188,8 @@ Only `TS_ADDRESS` is required.
 | `TTS_DUCK` | `0.15` | music gain while speaking (`1` = no ducking) |
 | `GREET` | `true` | greet people joining the channel (needs TTS) |
 | `GREETINGS_FILE` | `$DATA_DIR/greetings.json` | greetings |
+| `GREET_VOLUME` | `1.5` | greeting loudness relative to other speech |
+| `GREET_DUCK` | `0.05` | music gain while greeting |
 | **yt-dlp** | | |
 | `YTDLP_ARGS` | — | extra yt-dlp args (cookies, player clients, PO token provider) |
 | `YTDLP_AUTO_UPDATE` | `true` | `pip install -U yt-dlp` on container start |

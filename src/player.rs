@@ -143,6 +143,8 @@ pub struct Player {
 	sfx_gain: f32,
 	/// Speech currently talking, and the messages waiting after it.
 	speech: Option<Decoder>,
+	/// The speech talking now is a greeting (ducks deeper).
+	greeting: bool,
 	speeches: VecDeque<(Speech, Option<String>)>,
 	/// Current music gain, faded towards `tts_duck` while speech talks.
 	duck: f32,
@@ -200,6 +202,7 @@ pub fn spawn(
 		sfx: None,
 		sfx_gain: 1.0,
 		speech: None,
+		greeting: false,
 		speeches: VecDeque::new(),
 		duck: 1.0,
 		ts_status,
@@ -909,11 +912,15 @@ impl Player {
 		let (sfx, sfx_ended) = pull_overlay(&mut self.sfx, "sound");
 		// Duck while speech is on, including while the TTS server synthesizes, and hold the
 		// speech back until the music is down so the first words aren't buried.
-		let duck_to = if self.speech.is_some() { self.cfg.tts_duck } else { 1.0 };
+		let duck_to = match (&self.speech, self.greeting) {
+			(None, _) => 1.0,
+			(Some(_), true) => self.cfg.greet_duck,
+			(Some(_), false) => self.cfg.tts_duck,
+		};
 		let duck_from = self.duck;
 		let step = if duck_to < self.duck { DUCK_DOWN } else { DUCK_UP };
 		self.duck += (duck_to - self.duck).clamp(-step, step);
-		let ducked = !has_music || self.duck <= self.cfg.tts_duck + 1e-3;
+		let ducked = !has_music || self.duck <= duck_to + 1e-3;
 		let (speech, speech_ended) = if ducked { pull_overlay(&mut self.speech, "speech") } else { (None, false) };
 		if speech_ended {
 			self.start_speech();
@@ -976,9 +983,11 @@ impl Player {
 	/// Starts the next queued speech message, skipping ones that can't start.
 	fn start_speech(&mut self) {
 		while let Some((speech, by)) = self.speeches.pop_front() {
-			match Decoder::spawn_tts(&self.cfg, &speech.text, &speech.voice) {
+			let gain = if speech.greeting { self.cfg.greet_volume } else { 1.0 };
+			match Decoder::spawn_tts(&self.cfg, &speech.text, &speech.voice, gain) {
 				Ok(d) => {
 					self.speech = Some(d);
+					self.greeting = speech.greeting;
 					if speech.logged {
 						self.log(by, EventKind::Tts { text: speech.text, voice: speech.voice });
 					}

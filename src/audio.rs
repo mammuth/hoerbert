@@ -88,15 +88,23 @@ impl Decoder {
 		let mut yt_child = yt.spawn().context("failed to start yt-dlp")?;
 		let yt_stdout = yt_child.stdout.take().ok_or_else(|| anyhow!("yt-dlp stdout missing"))?;
 		let yt_stdout: Stdio = yt_stdout.try_into().map_err(|_| anyhow!("failed to convert yt-dlp stdout"))?;
-		let ff_child = Self::spawn_ffmpeg_stdin(cfg, yt_stdout, start_secs)?;
+		let ff_child = Self::spawn_ffmpeg_stdin(cfg, yt_stdout, start_secs, None)?;
 		Self::wrap(vec![yt_child, ff_child])
 	}
 
-	/// Speech: a WAV from the TTS server, piped into ffmpeg.
-	pub fn spawn_tts(cfg: &Config, text: &str, voice: &str) -> Result<Decoder> {
+	/// Speech: a WAV from the TTS server, piped into ffmpeg, which compresses
+	/// it so it is loud and clear over the music; `gain` goes on top, under
+	/// the limiter, so even a loud greeting doesn't distort.
+	pub fn spawn_tts(cfg: &Config, text: &str, voice: &str, gain: f32) -> Result<Decoder> {
 		let url = cfg.tts_url.as_ref().ok_or_else(|| anyhow!("tts is off"))?;
 		let url = format!("{url}/{voice}");
-		let mut ff = Self::spawn_ffmpeg_stdin(cfg, Stdio::piped(), 0.0)?;
+		// The TTS server delivers -20 dBFS RMS; compressed and boosted into the
+		// limiter that is ~8 dB louder (greetings ~10 dB) with peaks capped.
+		let filter = format!(
+			"acompressor=threshold=0.063:ratio=6:attack=3:release=50:makeup=4,volume={:.2},alimiter=limit=0.9:level=0",
+			1.6 * gain
+		);
+		let mut ff = Self::spawn_ffmpeg_stdin(cfg, Stdio::piped(), 0.0, Some(&filter))?;
 		let mut stdin = ff.stdin.take().ok_or_else(|| anyhow!("ffmpeg stdin missing"))?;
 		let text = text.to_owned();
 		tokio::spawn(async move {
@@ -112,13 +120,16 @@ impl Decoder {
 		Self::wrap(vec![ff])
 	}
 
-	fn spawn_ffmpeg_stdin(cfg: &Config, input: Stdio, start_secs: f64) -> Result<Child> {
+	fn spawn_ffmpeg_stdin(cfg: &Config, input: Stdio, start_secs: f64, filter: Option<&str>) -> Result<Child> {
 		let mut ff = Command::new(&cfg.ffmpeg_bin);
 		ff.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
 		if start_secs > 0.0 {
 			ff.arg("-ss").arg(format!("{start_secs:.3}"));
 		}
 		ff.args(["-i", "pipe:0"]);
+		if let Some(f) = filter {
+			ff.args(["-af", f]);
+		}
 		Self::output_args(&mut ff);
 		ff.stdin(input).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
 		ff.spawn().context("failed to start ffmpeg")

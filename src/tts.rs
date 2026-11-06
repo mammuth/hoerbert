@@ -27,6 +27,8 @@ pub struct Speech {
 	pub voice: String,
 	/// Shown in the history; greetings are not.
 	pub logged: bool,
+	/// Greetings are louder (`GREET_VOLUME`, `GREET_DUCK`).
+	pub greeting: bool,
 }
 
 #[derive(Clone)]
@@ -80,7 +82,7 @@ impl Tts {
 			return Err(TtsError::Invalid("nothing to say".into()));
 		}
 		let voice = voice.and_then(language).or_else(|| language(&self.cfg.tts_voice)).unwrap_or_else(|| "en".into());
-		Ok(Speech { voice, text, logged: true })
+		Ok(Speech { voice, text, logged: true, greeting: false })
 	}
 }
 

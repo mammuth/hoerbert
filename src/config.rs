@@ -46,6 +46,10 @@ pub struct Config {
 	pub tts_duck: f32,
 	/// Say hello to people joining the channel.
 	pub greet: bool,
+	/// Greeting loudness relative to other speech.
+	pub greet_volume: f32,
+	/// Music gain while a greeting plays.
+	pub greet_duck: f32,
 	pub greetings_file: PathBuf,
 }
 
@@ -96,6 +100,8 @@ impl Config {
 			tts_volume: env("TTS_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(10.0),
 			tts_duck: env("TTS_DUCK").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.15).clamp(0.0, 1.0),
 			greet: env("GREET").map(|v| v != "false" && v != "0").unwrap_or(true),
+			greet_volume: env("GREET_VOLUME").and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.5).clamp(0.0, 4.0),
+			greet_duck: env("GREET_DUCK").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.05).clamp(0.0, 1.0),
 			greetings_file: env("GREETINGS_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("greetings.json")),
 			data_dir,
 			ytdlp_bin: env("YTDLP_BIN").unwrap_or_else(|| "yt-dlp".into()),
