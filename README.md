@@ -113,8 +113,9 @@ on one core).
   [samples](https://rhasspy.github.io/piper-samples/) with a build arg, one
   `language:voice` each: `--build-arg PIPER_VOICES="en:en_US-lessac-low de:de_DE-thorsten-medium"`.
   Languages without a voice are spoken with the `TTS_VOICE` one.
-- A small TTS server in the container keeps the voices in memory (~300 MB for two).
-  `TTS=false` turns it off and saves that.
+- A small TTS server in the container keeps the voices in memory (~150 MB each),
+  loading each on first use. After `TTS_IDLE` minutes without speech it frees
+  them again; the next message then takes ~1 s longer. `TTS=false` turns it off.
 
 </details>
 
@@ -178,6 +179,7 @@ Only `TS_ADDRESS` is required.
 | `TTS_VOICE` | `en` | default voice language, `en` or `de` |
 | `TTS_SPEED` | `de=1.2` | talking speed per language, e.g. `de=1.3,en=1.1` |
 | `TTS_URL` | `http://127.0.0.1:5002` in Docker | TTS server; TTS is off without it |
+| `TTS_IDLE` | `30` | minutes without speech before the voices are unloaded (`0`: never) |
 | `TTS_MAX_CHARS` | `200` | longer messages are cut |
 | `TTS_COOLDOWN` | `1` | seconds between two messages per user |
 | `TTS_VOLUME` | `10` | speech loudness relative to the music |

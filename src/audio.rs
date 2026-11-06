@@ -202,8 +202,15 @@ impl Decoder {
 
 static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap_or_default());
 
-/// A WAV from the TTS server.
+/// A WAV from the TTS server. It restarts after idling (see
+/// `tts/piper_server.py`), so a refused connection gets a second try.
 async fn tts_wav(url: &str, text: &str) -> Result<Vec<u8>> {
-	let res = HTTP.post(url).body(text.to_owned()).send().await?.error_for_status()?;
-	Ok(res.bytes().await?.to_vec())
+	let res = match HTTP.post(url).body(text.to_owned()).send().await {
+		Err(e) if e.is_connect() => {
+			tokio::time::sleep(Duration::from_secs(1)).await;
+			HTTP.post(url).body(text.to_owned()).send().await?
+		}
+		res => res?,
+	};
+	Ok(res.error_for_status()?.bytes().await?.to_vec())
 }
