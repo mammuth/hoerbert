@@ -70,6 +70,12 @@ impl Tts {
 	/// Cleans the text, checks the voice and enforces the per-user cooldown.
 	pub fn prepare(&self, text: &str, voice: Option<&str>, by: &str) -> Result<Speech, TtsError> {
 		let speech = self.speech(text, voice)?;
+		self.cooldown(by)?;
+		Ok(speech)
+	}
+
+	/// Per-user cooldown: fails if `by` spoke too recently, otherwise starts it.
+	pub fn cooldown(&self, by: &str) -> Result<(), TtsError> {
 		let cooldown = Duration::from_secs(self.cfg.tts_cooldown);
 		let mut last = self.last.lock().unwrap();
 		last.retain(|_, t| t.elapsed() < cooldown);
@@ -78,7 +84,7 @@ impl Tts {
 			return Err(TtsError::Cooldown((cooldown - t.elapsed()).as_secs() + 1));
 		}
 		last.insert(key, Instant::now());
-		Ok(speech)
+		Ok(())
 	}
 
 	/// Cleans the text and checks the voice, no cooldown.

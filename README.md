@@ -90,6 +90,8 @@ The web UI lists every channel on the server and who is in it, the way the
 TeamSpeak client does: nested channels, spacers, muted mics and speakers,
 and away users. The bot's own channel is highlighted. It updates live as
 people join, leave and move around. "Hide empty" hides channels nobody is in.
+Hover someone in the bot's channel and hit **👋 Greet!** to have Hörbert say
+a random greeting to them.
 
 Anyone with the web key can see who is online server-wide.
 `SERVER_VIEW=false` turns it off.

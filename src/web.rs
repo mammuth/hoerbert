@@ -15,6 +15,7 @@ use serde_json::json;
 use tracing::debug;
 use uuid::Uuid;
 
+use crate::greet::Greeter;
 use crate::model::Track;
 use crate::player::{Cmd, PlayerHandle};
 use crate::resolver::Resolver;
@@ -31,6 +32,8 @@ pub struct AppState {
 	pub resolver: Resolver,
 	pub soundboard: Soundboard,
 	pub tts: Tts,
+	/// `None` when greetings are off.
+	pub greeter: Option<Greeter>,
 	pub auth: Auth,
 }
 
@@ -147,6 +150,7 @@ pub fn router(state: AppState) -> Router {
 		.route("/sounds", get(sounds))
 		.route("/sounds/{slug}/play", post(sound_play))
 		.route("/tts", post(tts))
+		.route("/greet", post(greet))
 		.route_layer(middleware::from_fn_with_state(state.clone(), require_key))
 		.route("/login", post(login));
 	Router::new()
@@ -352,7 +356,7 @@ async fn queue_play(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiResul
 
 async fn sounds(State(s): State<AppState>) -> Response {
 	let tts = s.tts.enabled().then(|| json!({ "max_chars": s.tts.max_chars() }));
-	Json(json!({ "sounds": s.soundboard.list(), "tts": tts })).into_response()
+	Json(json!({ "sounds": s.soundboard.list(), "tts": tts, "greet": s.greeter.is_some() })).into_response()
 }
 async fn sound_play(State(s): State<AppState>, Path(slug): Path<String>, body: Option<Json<ByBody>>) -> ApiResult {
 	let sound = s.soundboard.get(&slug.to_ascii_lowercase()).ok_or_else(not_found)?;
@@ -379,5 +383,24 @@ async fn tts(State(s): State<AppState>, Json(b): Json<TtsBody>) -> ApiResult {
 		TtsError::Invalid(_) => bad(e.to_string()),
 	})?;
 	s.player.send_as(Cmd::Say(speech), Some(by)).await;
+	ok()
+}
+
+#[derive(Deserialize)]
+struct GreetBody {
+	name: String,
+	#[serde(default)]
+	by: Option<String>,
+}
+/// Greets someone in the bot's channel on request, with the requester's TTS cooldown.
+async fn greet(State(s): State<AppState>, Json(b): Json<GreetBody>) -> ApiResult {
+	let greeter = s.greeter.as_ref().ok_or_else(not_found)?;
+	let by = b.by.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).ok_or_else(|| bad("enter your name first"))?;
+	if !s.player.snapshot().ts.users.contains(&b.name) {
+		return Err(bad(format!("{} is not in the channel", b.name)));
+	}
+	s.tts.cooldown(&by).map_err(|e| ApiError(StatusCode::TOO_MANY_REQUESTS, e.to_string()))?;
+	let speech = greeter.greeting_now(&b.name).ok_or_else(|| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "no usable greetings".into()))?;
+	s.player.send_as(Cmd::Say(crate::tts::Speech { logged: true, ..speech }), Some(by)).await;
 	ok()
 }

@@ -1,9 +1,16 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
+  import { api } from './api'
   import Icon from './Icon.svelte'
   import { store } from './store.svelte'
   import type { TsChannel } from './types'
 
   let hideEmpty = $state(false)
+  /** Greetings are on (the server has TTS and GREET). */
+  let canGreet = $state(false)
+  onMount(() => { api.sounds().then((r) => { canGreet = r.greet }).catch(() => {}) })
+
+  const greet = (name: string) => store.runAs((who) => api.greet(name, who), `Greeting ${name}`)
   try { hideEmpty = localStorage.getItem('hoerbert.hideEmpty') === '1' } catch {}
 
   function toggleEmpty() {
@@ -77,6 +84,9 @@
                       {#if c.muted}<span title="microphone muted"><Icon name="micOff" size={13} /></span>{/if}
                       {#if c.deaf}<span title="sound muted"><Icon name="headsetOff" size={13} /></span>{/if}
                     </span>
+                    {#if canGreet && here && !c.me}
+                      <button class="greet" onclick={() => greet(c.name)} title="Hörbert says hi to {c.name}">👋 Greet!</button>
+                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -115,6 +125,12 @@
   li.away { color: var(--faint); font-style: italic; }
   .flags { margin-left: auto; display: flex; gap: 4px; color: var(--danger); opacity: 0.8; }
   .flags span { display: flex; }
+
+  /* only in the bot's channel: everyone else would not hear it */
+  .greet { flex: none; padding: 3px 9px; font-size: 11.5px; font-weight: 600; border-radius: 999px; color: var(--accent-ink); background: var(--accent-2); border-color: var(--accent-2); opacity: 0; transform: translateX(4px) scale(0.9); transition: opacity 0.15s, transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1.4); }
+  .greet:hover { background: var(--accent); border-color: var(--accent); }
+  li:hover .greet, .greet:focus-visible { opacity: 1; transform: none; }
+  @media (hover: none) { .greet { opacity: 1; transform: none; } }
 
   .spacer { display: flex; align-items: center; min-height: 20px; margin: 6px 0; padding: 0 8px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
   .spacer.center { justify-content: center; }

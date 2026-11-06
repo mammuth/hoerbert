@@ -29,7 +29,8 @@ export const api = {
   queueRemove: (id: string) => req('POST', `/queue/${id}/remove`, by()),
   queueMove: (id: string, to: number) => req('POST', `/queue/${id}/move`, { to }),
   queuePlay: (id: string) => req('POST', `/queue/${id}/play`),
-  sounds: () => req<{ sounds: Sound[]; tts?: TtsInfo | null }>('GET', '/sounds'),
+  sounds: () => req<{ sounds: Sound[]; tts?: TtsInfo | null; greet: boolean }>('GET', '/sounds'),
   playSound: (slug: string) => req('POST', `/sounds/${encodeURIComponent(slug)}/play`, by()),
   say: (text: string, voice: string | undefined, who: string) => req('POST', '/tts', { text, voice, by: who }),
+  greet: (name: string, who: string) => req('POST', '/greet', { name, by: who }),
 }

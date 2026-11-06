@@ -35,7 +35,7 @@ const DEFAULTS: &str = r#"[
   { "text": "Welcome, {name}. We have been expecting you.", "lang": "en" },
   { "text": "A wild {name} appears!", "lang": "en" },
   { "text": "Oh, {name}! You scared me.", "lang": "en" },
-  { "text": "{name} is here. Let the party begin!", "lang": "en+croak" },
+  { "text": "{name} is here. Let the party begin!", "lang": "en" },
   { "text": "Psst. {name} is here.", "lang": "en+whisper" },
   { "text": "Moin {name}!", "lang": "de" },
   { "text": "Na, {name}, auch mal wieder hier?", "lang": "de" },
@@ -83,6 +83,13 @@ impl Greeter {
 			}
 			last.insert(key, Instant::now());
 		}
+		self.pick(&greetings, name)
+	}
+
+	/// A random greeting for `name`, ignoring the cooldown (someone asked for it).
+	pub fn greeting_now(&self, name: &str) -> Option<Speech> { self.pick(&self.load()?, name) }
+
+	fn pick(&self, greetings: &[Greeting], name: &str) -> Option<Speech> {
 		let g = greetings.choose(&mut rand::rng())?;
 		match self.tts.speech(&g.text.replace("{name}", name), g.lang.as_deref()) {
 			Ok(s) => Some(Speech { logged: false, ..s }),
