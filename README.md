@@ -168,11 +168,11 @@ Only `TS_ADDRESS` is required.
 | **Text to speech** | | |
 | `TTS` | `true` | enable TTS (off if `espeak-ng` is missing) |
 | `TTS_VOICE` | `en` | espeak-ng `language[+variant]`, e.g. `de`, `en+klatt` |
-| `TTS_SPEED` | `160` | words per minute |
+| `TTS_SPEED` | `140` | words per minute |
 | `TTS_MAX_CHARS` | `200` | longer messages are cut |
 | `TTS_COOLDOWN` | `1` | seconds between two messages per user |
-| `TTS_VOLUME` | `6` | speech loudness relative to the music |
-| `TTS_DUCK` | `0.3` | music gain while speaking (`1` = no ducking) |
+| `TTS_VOLUME` | `10` | speech loudness relative to the music |
+| `TTS_DUCK` | `0.15` | music gain while speaking (`1` = no ducking) |
 | `GREET` | `true` | greet people joining the channel (needs TTS) |
 | `GREETINGS_FILE` | `$DATA_DIR/greetings.json` | greetings |
 | **yt-dlp** | | |

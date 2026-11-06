@@ -36,8 +36,10 @@ const MAX_RETRIES: u8 = 2;
 const EMPTY_CHANNEL_GRACE: Duration = Duration::from_secs(60);
 /// Speech messages waiting beyond this are dropped.
 const SPEECH_QUEUE_MAX: usize = 5;
-/// Music gain change per 20 ms frame while (un)ducking: ~0.3 s fade.
-const DUCK_STEP: f32 = 0.05;
+/// Music gain change per 20 ms frame while ducking (~0.2 s fade) and
+/// unducking (~0.4 s fade).
+const DUCK_DOWN: f32 = 0.1;
+const DUCK_UP: f32 = 0.05;
 
 pub enum Cmd {
 	Add { tracks: Vec<Track>, requested_by: Option<String>, next: bool, play_now: bool },
@@ -905,7 +907,14 @@ impl Player {
 
 		let has_music = music.is_some();
 		let (sfx, sfx_ended) = pull_overlay(&mut self.sfx, "sound");
-		let (speech, speech_ended) = pull_overlay(&mut self.speech, "speech");
+		// Duck while speech is on, including espeak's startup, and hold the
+		// speech back until the music is down so the first words aren't buried.
+		let duck_to = if self.speech.is_some() { self.cfg.tts_duck } else { 1.0 };
+		let duck_from = self.duck;
+		let step = if duck_to < self.duck { DUCK_DOWN } else { DUCK_UP };
+		self.duck += (duck_to - self.duck).clamp(-step, step);
+		let ducked = !has_music || self.duck <= self.cfg.tts_duck + 1e-3;
+		let (speech, speech_ended) = if ducked { pull_overlay(&mut self.speech, "speech") } else { (None, false) };
 		if speech_ended {
 			self.start_speech();
 		}
@@ -913,10 +922,6 @@ impl Player {
 			// Stop talking unless the music keeps going.
 			let _ = self.audio_tx.try_send(AudioOut::End);
 		}
-		// Duck while speech is on, including espeak's startup.
-		let duck_to = if self.speech.is_some() { self.cfg.tts_duck } else { 1.0 };
-		let duck_from = self.duck;
-		self.duck += (duck_to - self.duck).clamp(-DUCK_STEP, DUCK_STEP);
 		if has_music || sfx.is_some() || speech.is_some() {
 			let tts_gain = self.cfg.tts_volume;
 			// Mix in f32 so a boosted clip only clips after the master volume.
