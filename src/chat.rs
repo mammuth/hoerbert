@@ -176,10 +176,10 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 			}
 			Some(s)
 		}
-		// `!tts:de hallo` picks a voice, `!tts:+whisper` a variant of the default one.
+		// `!tts:de hallo` picks the voice's language.
 		c if ctx.tts.enabled() && (c == "tts" || c == "say" || c.starts_with("tts:")) => {
 			if arg.is_empty() {
-				return Some(format!("usage: {prefix}tts <text> · {prefix}tts:de <text> · {prefix}tts:+whisper <text>"));
+				return Some(format!("usage: {prefix}tts <text> · {prefix}tts:de <text>"));
 			}
 			let voice = c.split_once(':').map(|(_, v)| v);
 			match ctx.tts.prepare(arg, voice, &invoker.name) {
@@ -234,7 +234,7 @@ fn help(prefix: &str, url: Option<&str>, suffix: Option<&str>, has_sounds: bool,
 		s.push_str(&format!("\n{prefix}soundboard – list sounds"));
 	}
 	if tts {
-		s.push_str(&format!("\n{prefix}tts <text> – say something (voices: {prefix}tts:de, {prefix}tts:+whisper …)"));
+		s.push_str(&format!("\n{prefix}tts <text> – say something ({prefix}tts:de <text> in German)"));
 	}
 	if let Some(u) = url {
 		s.push_str(&format!("\n🎛 {u}"));

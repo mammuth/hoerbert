@@ -907,7 +907,7 @@ impl Player {
 
 		let has_music = music.is_some();
 		let (sfx, sfx_ended) = pull_overlay(&mut self.sfx, "sound");
-		// Duck while speech is on, including espeak's startup, and hold the
+		// Duck while speech is on, including while the TTS server synthesizes, and hold the
 		// speech back until the music is down so the first words aren't buried.
 		let duck_to = if self.speech.is_some() { self.cfg.tts_duck } else { 1.0 };
 		let duck_from = self.duck;
@@ -973,7 +973,7 @@ impl Player {
 		}
 	}
 
-	/// Starts the next queued speech message, skipping ones espeak can't start.
+	/// Starts the next queued speech message, skipping ones that can't start.
 	fn start_speech(&mut self) {
 		while let Some((speech, by)) = self.speeches.pop_front() {
 			match Decoder::spawn_tts(&self.cfg, &speech.text, &speech.voice) {

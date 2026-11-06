@@ -33,10 +33,10 @@ pub struct Config {
 	/// Drop history tracks and events older than this.
 	pub history_hours: u64,
 	pub tts: bool,
-	pub espeak_bin: String,
-	/// espeak-ng voice, optionally with a variant: `en`, `de+croak`.
+	/// TTS server (`tts/piper_server.py`); `None`: no TTS.
+	pub tts_url: Option<String>,
+	/// Default voice language: `en`, `de`.
 	pub tts_voice: String,
-	pub tts_speed: u32,
 	pub tts_max_chars: usize,
 	/// Seconds a user has to wait between two messages.
 	pub tts_cooldown: u64,
@@ -89,9 +89,8 @@ impl Config {
 			soundboard_volume: env("SOUNDBOARD_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(5.0),
 			history_hours: env("HISTORY_HOURS").and_then(|v| v.parse().ok()).unwrap_or(168),
 			tts: env("TTS").map(|v| v != "false" && v != "0").unwrap_or(true),
-			espeak_bin: env("ESPEAK_BIN").unwrap_or_else(|| "espeak-ng".into()),
+			tts_url: env("TTS_URL").map(|u| u.trim_end_matches('/').to_string()),
 			tts_voice: env("TTS_VOICE").unwrap_or_else(|| "en".into()),
-			tts_speed: env("TTS_SPEED").and_then(|v| v.parse().ok()).unwrap_or(140),
 			tts_max_chars: env("TTS_MAX_CHARS").and_then(|v| v.parse().ok()).unwrap_or(200),
 			tts_cooldown: env("TTS_COOLDOWN").and_then(|v| v.parse().ok()).unwrap_or(1),
 			tts_volume: env("TTS_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(10.0),

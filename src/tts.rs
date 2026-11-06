@@ -1,14 +1,14 @@
-//! Text to speech with espeak-ng: `!tts <text>` or the web UI, spoken over
-//! the (ducked) music. Robotic on purpose.
+//! Text to speech: `!tts <text>` or the web UI, spoken over the (ducked)
+//! music with Piper voices from the TTS server (`tts/piper_server.py`).
 //!
-//! Voices are espeak-ng languages with an optional variant: `en`, `de+klatt`,
-//! or just `+whisper` for a variant of the default language.
+//! A voice is a language (`en`, `de`); the server speaks languages it has
+//! no voice for with its default one.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::config::Config;
 
@@ -23,6 +23,7 @@ pub enum TtsError {
 /// A message waiting to be spoken.
 pub struct Speech {
 	pub text: String,
+	/// Language of the voice.
 	pub voice: String,
 	/// Shown in the history; greetings are not.
 	pub logged: bool,
@@ -31,43 +32,25 @@ pub struct Speech {
 #[derive(Clone)]
 pub struct Tts {
 	cfg: Config,
-	/// espeak-ng languages and variants by lowercase name; `None`: TTS is off.
-	voices: Option<Arc<(Voices, Voices)>>,
 	/// Last message per user, for the cooldown.
 	last: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl Tts {
-	/// Asks espeak-ng for its voices once; without espeak-ng, TTS stays off.
 	pub fn new(cfg: Config) -> Self {
-		let voices = if cfg.tts {
-			match (list_voices(&cfg.espeak_bin, "--voices"), list_voices(&cfg.espeak_bin, "--voices=variant")) {
-				(Some(langs), Some(variants)) => {
-					info!(languages = langs.len(), variants = variants.len(), "tts enabled");
-					Some(Arc::new((langs, variants)))
-				}
-				_ => {
-					warn!(bin = %cfg.espeak_bin, "espeak-ng not found, tts disabled");
-					None
-				}
-			}
-		} else {
-			None
-		};
-		let tts = Self { cfg, voices, last: Default::default() };
+		let tts = Self { cfg, last: Default::default() };
 		if tts.enabled() {
-			if let Err(e) = tts.voice(None) {
-				warn!(error = %e, "TTS_VOICE is not an espeak-ng voice");
-			}
+			info!(url = ?tts.cfg.tts_url, "tts enabled");
 		}
 		tts
 	}
 
-	pub fn enabled(&self) -> bool { self.voices.is_some() }
+	/// Needs `TTS` on and a TTS server.
+	pub fn enabled(&self) -> bool { self.cfg.tts && self.cfg.tts_url.is_some() }
 
 	pub fn max_chars(&self) -> usize { self.cfg.tts_max_chars }
 
-	/// Cleans the text, checks the voice and enforces the per-user cooldown.
+	/// Cleans the text, picks the voice and enforces the per-user cooldown.
 	pub fn prepare(&self, text: &str, voice: Option<&str>, by: &str) -> Result<Speech, TtsError> {
 		let speech = self.speech(text, voice)?;
 		self.cooldown(by)?;
@@ -87,62 +70,25 @@ impl Tts {
 		Ok(())
 	}
 
-	/// Cleans the text and checks the voice, no cooldown.
+	/// Cleans the text and picks the voice, no cooldown.
 	pub fn speech(&self, text: &str, voice: Option<&str>) -> Result<Speech, TtsError> {
+		if !self.enabled() {
+			return Err(TtsError::Invalid("tts is off".into()));
+		}
 		let text = clean(text, self.cfg.tts_max_chars);
 		if text.is_empty() {
 			return Err(TtsError::Invalid("nothing to say".into()));
 		}
-		Ok(Speech { voice: self.voice(voice)?, text, logged: true })
-	}
-
-	/// `None`: the default voice. `+variant` keeps the default language.
-	fn voice(&self, voice: Option<&str>) -> Result<String, TtsError> {
-		let Some((langs, variants)) = self.voices.as_deref() else {
-			return Err(TtsError::Invalid("tts is off".into()));
-		};
-		let v = voice.map(str::trim).filter(|v| !v.is_empty()).unwrap_or(&self.cfg.tts_voice).to_lowercase();
-		let (lang, variant) = match v.split_once('+') {
-			Some(("", var)) => (self.cfg.tts_voice.split('+').next().unwrap_or("en").to_lowercase(), Some(var)),
-			Some((l, var)) => (l.to_string(), Some(var)),
-			None => (v.clone(), None),
-		};
-		if !langs.contains_key(&lang) {
-			return Err(TtsError::Invalid(format!("unknown language {lang}")));
-		}
-		Ok(match variant {
-			// Variant names are case-sensitive (`Demonic`); a wrong case silently falls back to the plain voice.
-			Some(var) => match variants.get(var) {
-				Some(name) => format!("{lang}+{name}"),
-				None => return Err(TtsError::Invalid(format!("unknown voice +{var}"))),
-			},
-			None => lang,
-		})
+		let voice = voice.and_then(language).or_else(|| language(&self.cfg.tts_voice)).unwrap_or_else(|| "en".into());
+		Ok(Speech { voice, text, logged: true })
 	}
 }
 
-/// Lowercase name → name as espeak-ng spells it.
-type Voices = HashMap<String, String>;
-
-/// Language codes (`de`, `en-us`) or variant names (`whisper`, `Demonic`)
-/// from `espeak-ng --voices[=variant]`.
-fn list_voices(bin: &str, arg: &str) -> Option<Voices> {
-	let out = std::process::Command::new(bin).arg(arg).output().ok().filter(|o| o.status.success())?;
-	let names = String::from_utf8_lossy(&out.stdout)
-		.lines()
-		.skip(1)
-		.flat_map(|l| {
-			let cols: Vec<&str> = l.split_whitespace().collect();
-			// Pty Language Age/Gender VoiceName File (alias prio)…; variants live in `!v/<name>`.
-			// Aliases matter: plain `en` only shows up as `(en 2)` next to `en-gb`.
-			let names: Vec<&str> = match cols.get(4).and_then(|f| f.strip_prefix("!v/")) {
-				Some(variant) => vec![variant],
-				None => cols.get(1).into_iter().copied().chain(cols.iter().skip(5).filter_map(|c| c.strip_prefix('('))).collect(),
-			};
-			names.into_iter().map(|n| (n.to_lowercase(), n.to_string())).collect::<Vec<_>>()
-		})
-		.collect();
-	Some(names)
+/// `de`, `en-us`… from a voice; drops old espeak-ng variants (`en+croak` → `en`)
+/// and anything that could not be a language.
+fn language(voice: &str) -> Option<String> {
+	let lang = voice.split('+').next()?.trim().to_lowercase();
+	(!lang.is_empty() && lang.len() <= 10 && lang.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then_some(lang)
 }
 
 /// Links read out loud are no fun: say "link" instead. Collapses whitespace
@@ -166,9 +112,10 @@ mod tests {
 	}
 
 	#[test]
-	fn keeps_variant_case() {
-		let Some(variants) = list_voices("espeak-ng", "--voices=variant") else { return }; // no espeak-ng
-		assert_eq!(variants.get("demonic").map(String::as_str), Some("Demonic"));
-		assert_eq!(variants.get("croak").map(String::as_str), Some("croak"));
+	fn languages() {
+		assert_eq!(language("de").as_deref(), Some("de"));
+		assert_eq!(language("en+croak").as_deref(), Some("en"));
+		assert_eq!(language("+whisper"), None);
+		assert_eq!(language("../x"), None);
 	}
 }

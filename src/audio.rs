@@ -4,13 +4,14 @@
 //! seconds of buffer), the player consumes exactly one frame per 20 ms tick.
 
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::config::Config;
 use crate::resolver::StreamInfo;
@@ -91,24 +92,24 @@ impl Decoder {
 		Self::wrap(vec![yt_child, ff_child])
 	}
 
-	/// Speech: espeak-ng writes a WAV to stdout, piped into ffmpeg.
+	/// Speech: a WAV from the TTS server, piped into ffmpeg.
 	pub fn spawn_tts(cfg: &Config, text: &str, voice: &str) -> Result<Decoder> {
-		let mut es = Command::new(&cfg.espeak_bin);
-		// Text via stdin, so it can never be mistaken for an option.
-		es.args(["--stdin", "--stdout", "-v", voice, "-s"]).arg(cfg.tts_speed.to_string());
-		es.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-		debug!(?es, "spawning espeak-ng");
-		let mut es_child = es.spawn().context("failed to start espeak-ng")?;
-		let mut stdin = es_child.stdin.take().ok_or_else(|| anyhow!("espeak-ng stdin missing"))?;
+		let url = cfg.tts_url.as_ref().ok_or_else(|| anyhow!("tts is off"))?;
+		let url = format!("{url}/{voice}");
+		let mut ff = Self::spawn_ffmpeg_stdin(cfg, Stdio::piped(), 0.0)?;
+		let mut stdin = ff.stdin.take().ok_or_else(|| anyhow!("ffmpeg stdin missing"))?;
 		let text = text.to_owned();
 		tokio::spawn(async move {
-			let _ = stdin.write_all(text.as_bytes()).await;
-			// dropping stdin sends EOF, which starts the synthesis
+			match tts_wav(&url, &text).await {
+				Ok(wav) => {
+					let _ = stdin.write_all(&wav).await;
+				}
+				// The speech then just ends.
+				Err(e) => warn!(error = %format!("{e:#}"), "tts failed"),
+			}
+			// dropping stdin ends ffmpeg's input
 		});
-		let es_stdout = es_child.stdout.take().ok_or_else(|| anyhow!("espeak-ng stdout missing"))?;
-		let es_stdout: Stdio = es_stdout.try_into().map_err(|_| anyhow!("failed to convert espeak-ng stdout"))?;
-		let ff_child = Self::spawn_ffmpeg_stdin(cfg, es_stdout, 0.0)?;
-		Self::wrap(vec![es_child, ff_child])
+		Self::wrap(vec![ff])
 	}
 
 	fn spawn_ffmpeg_stdin(cfg: &Config, input: Stdio, start_secs: f64) -> Result<Child> {
@@ -197,4 +198,12 @@ impl Decoder {
 			let _ = c.wait().await;
 		}
 	}
+}
+
+static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap_or_default());
+
+/// A WAV from the TTS server.
+async fn tts_wav(url: &str, text: &str) -> Result<Vec<u8>> {
+	let res = HTTP.post(url).body(text.to_owned()).send().await?.error_for_status()?;
+	Ok(res.bytes().await?.to_vec())
 }

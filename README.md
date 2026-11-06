@@ -16,7 +16,7 @@ Control it from a shared web UI or with `!commands` in the chat.
   [SponsorBlock](https://sponsor.ajay.app/) segments on YouTube are skipped.
 - **Soundboard:** your own clips as buttons and `!<name>` commands, mixed over the music.
 - **Server view:** see who's online in every channel, live, with mute and away status.
-- **Text to speech:** `!tts hello` makes the bot talk, with silly voices; the music ducks while it does.
+- **Text to speech:** `!tts hello` makes the bot talk with natural English and German voices; the music ducks while it does.
 - **Greetings:** says hi when someone joins the channel, with lines you can add to.
 - **Good sound:** 48 kHz stereo Opus at 128 kbit/s.
 
@@ -58,7 +58,6 @@ keeps strangers out but is not strong security.
 !soundboard              list sounds, play one with !<slug>
 !tts <text>              say something (also !say)
 !tts:de <text>           …in another language
-!tts:+whisper <text>     …with a voice variant (croak, klatt, Demonic, grandpa, …)
 !help
 ```
 
@@ -98,8 +97,10 @@ Anyone with the web key can see who is online server-wide.
 
 ### Text to speech
 
-`!tts` and the *Say* box in the web UI read text out loud with
-[espeak-ng](https://github.com/espeak-ng/espeak-ng): tiny, offline, and very robotic.
+`!tts` and the *Say* box in the web UI read text out loud, offline, with natural
+sounding English and German [Piper](https://rhasspy.github.io/piper-samples/) voices
+(run with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), ~0.2 s per message
+on one core).
 
 <details>
 <summary>Details</summary>
@@ -108,7 +109,12 @@ Anyone with the web key can see who is online server-wide.
 - The music gets quieter while the bot talks (`TTS_DUCK`).
 - Links are read as "link".
 - Each user waits `TTS_COOLDOWN` seconds between messages.
-- `espeak-ng --voices` and `espeak-ng --voices=variant` list the available voices.
+- Voices are baked into the image. Pick others (or more languages) from the
+  [samples](https://rhasspy.github.io/piper-samples/) with a build arg, one
+  `language:voice` each: `--build-arg PIPER_VOICES="en:en_US-lessac-low de:de_DE-thorsten-medium"`.
+  Languages without a voice are spoken with the `TTS_VOICE` one.
+- A small TTS server in the container keeps the voices in memory (~300 MB for two).
+  `TTS=false` turns it off and saves that.
 
 </details>
 
@@ -122,7 +128,7 @@ add your own. `GREET=false` turns greetings off.
 [
   { "text": "Welcome back, {name}!", "lang": "en" },
   { "text": "Moin {name}!", "lang": "de" },
-  { "text": "Psst. {name} is here.", "lang": "en+whisper" }
+  { "text": "Psst. {name} ist da.", "lang": "de" }
 ]
 ```
 
@@ -130,7 +136,7 @@ add your own. `GREET=false` turns greetings off.
 <summary>Details</summary>
 
 - `{name}` is the nickname of whoever joined.
-- `lang` is an espeak-ng `language[+variant]` like `TTS_VOICE` (the default if left out).
+- `lang` is the voice's language like `TTS_VOICE` (the default if left out).
 - Each person is greeted at most once a minute, and nobody already in the
   channel is greeted when the bot (re)connects.
 - The file is re-read on every join, so edits apply without a restart.
@@ -168,9 +174,10 @@ Only `TS_ADDRESS` is required.
 | `SOUNDBOARD_FILE` | `$DATA_DIR/sounds.json` | soundboard config |
 | `SOUNDBOARD_VOLUME` | `5` | sound loudness relative to the music |
 | **Text to speech** | | |
-| `TTS` | `true` | enable TTS (off if `espeak-ng` is missing) |
-| `TTS_VOICE` | `en` | espeak-ng `language[+variant]`, e.g. `de`, `en+klatt` |
-| `TTS_SPEED` | `140` | words per minute |
+| `TTS` | `true` | enable TTS |
+| `TTS_VOICE` | `en` | default voice language, `en` or `de` |
+| `TTS_SPEED` | `de=1.2` | talking speed per language, e.g. `de=1.3,en=1.1` |
+| `TTS_URL` | `http://127.0.0.1:5002` in Docker | TTS server; TTS is off without it |
 | `TTS_MAX_CHARS` | `200` | longer messages are cut |
 | `TTS_COOLDOWN` | `1` | seconds between two messages per user |
 | `TTS_VOLUME` | `10` | speech loudness relative to the music |
@@ -235,6 +242,9 @@ TS_ADDRESS=127.0.0.1 cargo run
 # frontend with hot reload, proxied to :8080
 cd web && npm install && npm run dev
 ```
+
+TTS needs the TTS server (`tts/piper_server.py`, see the Dockerfile for its voices);
+point `TTS_URL` at it, otherwise TTS is off.
 
 `cargo run --example listen -- <server> [channel] [seconds]` joins as a second
 client and counts the audio packets it receives. Handy to check the bot is

@@ -4,10 +4,10 @@
 //! ```json
 //! [
 //!   { "text": "Welcome back, {name}!", "lang": "en" },
-//!   { "text": "Psst. {name} ist da.", "lang": "de+whisper" }
+//!   { "text": "Psst. {name} ist da.", "lang": "de" }
 //! ]
 //! ```
-//! `{name}` is whoever joined. `lang` is an espeak-ng `language[+variant]`
+//! `{name}` is whoever joined. `lang` is the voice's language (`en`, `de`)
 //! like `TTS_VOICE`, which is also the default. The file is created with the
 //! defaults below if missing and re-read on every join, so edits apply
 //! without a restart.
@@ -36,11 +36,9 @@ const DEFAULTS: &str = r#"[
   { "text": "A wild {name} appears!", "lang": "en" },
   { "text": "Oh, {name}! You scared me.", "lang": "en" },
   { "text": "{name} is here. Let the party begin!", "lang": "en" },
-  { "text": "Psst. {name} is here.", "lang": "en+whisper" },
+  { "text": "Psst. {name} is here.", "lang": "en" },
   { "text": "Moin {name}!", "lang": "de" },
-  { "text": "Na, {name}, auch mal wieder hier?", "lang": "de" },
-  { "text": "Bonjour {name}!", "lang": "fr" },
-  { "text": "¡Hola {name}!", "lang": "es" }
+  { "text": "Na, {name}, auch mal wieder hier?", "lang": "de" }
 ]
 "#;
 
@@ -125,7 +123,7 @@ mod tests {
 	#[test]
 	fn defaults_parse() {
 		let g: Vec<Greeting> = serde_json::from_str(DEFAULTS).unwrap();
-		assert_eq!(g.len(), 12);
+		assert_eq!(g.len(), 10);
 		assert!(g.iter().all(|g| g.text.contains("{name}") && g.lang.is_some()));
 	}
 }

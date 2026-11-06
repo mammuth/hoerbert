@@ -12,13 +12,9 @@
   let voice = $state<string | undefined>(undefined)
   let saying = $state(false)
 
-  /** espeak-ng voices worth a laugh; `+x` is a variant of the server's language. None picked: the default voice. */
+  /** Voice languages besides the default one; none picked: the default voice. */
   const voices = [
     { id: 'de', label: 'Deutsch', emoji: '🇩🇪' },
-    { id: '+whisper', label: 'Whisper', emoji: '🤫' },
-    { id: '+croak', label: 'Croak', emoji: '🐸' },
-    { id: '+demonic', label: 'Demon', emoji: '😈' },
-    { id: '+grandpa', label: 'Opa', emoji: '👴' },
   ]
 
   // The sounds file is re-read server-side, so refresh when the tab regains focus.

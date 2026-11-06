@@ -23,7 +23,7 @@ RUN touch src/main.rs && cargo build --release --locked && strip target/release/
 FROM debian:bookworm-slim
 ARG DENO_VERSION=v2.9.8
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg espeak-ng libopus0 ca-certificates curl unzip python3 python3-venv tini \
+      ffmpeg libopus0 ca-certificates curl unzip python3 python3-venv tini \
     && rm -rf /var/lib/apt/lists/*
 # Deno: JS runtime yt-dlp needs for YouTube's signature challenges
 RUN ARCH="$(uname -m)" && case "$ARCH" in x86_64) DA=x86_64 ;; aarch64) DA=aarch64 ;; *) echo "unsupported arch $ARCH" && exit 1 ;; esac \
@@ -32,10 +32,22 @@ RUN ARCH="$(uname -m)" && case "$ARCH" in x86_64) DA=x86_64 ;; aarch64) DA=aarch
 # yt-dlp in its own venv so it can self-update at container start
 RUN python3 -m venv /opt/ytdlp && /opt/ytdlp/bin/pip install --no-cache-dir -U pip "yt-dlp[default]" bgutil-ytdlp-pot-provider \
     && ln -s /opt/ytdlp/bin/yt-dlp /usr/local/bin/yt-dlp && yt-dlp --version
+# Text to speech: Piper voices on sherpa-onnx (2.x can't phonemize Piper voices yet).
+# One `language:voice` each, voices from the sherpa-onnx tts-models release.
+ARG PIPER_VOICES="en:en_US-lessac-low de:de_DE-pavoque-low"
+RUN python3 -m venv /opt/tts && /opt/tts/bin/pip install --no-cache-dir "sherpa-onnx<2" \
+    && mkdir -p /opt/tts/voices && cd /opt/tts \
+    && for v in $PIPER_VOICES; do \
+         m="vits-piper-${v#*:}"; \
+         curl -fsSL "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$m.tar.bz2" \
+           | python3 -c "import sys, tarfile; tarfile.open(fileobj=sys.stdin.buffer, mode='r|bz2').extractall()" \
+         && rm -rf espeak-ng-data && mv "$m/espeak-ng-data" . && mv "$m" "voices/${v%%:*}" || exit 1; \
+       done
+COPY tts/piper_server.py /opt/tts/server.py
 COPY --from=build /src/target/release/hoerbert /usr/local/bin/hoerbert
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && mkdir -p /data && useradd -r -u 1000 -d /data hoerbert && chown hoerbert /data
-ENV DATA_DIR=/data WEB_BIND=0.0.0.0:8080 YTDLP_AUTO_UPDATE=true
+ENV DATA_DIR=/data WEB_BIND=0.0.0.0:8080 YTDLP_AUTO_UPDATE=true TTS_URL=http://127.0.0.1:5002 TTS_SPEED=de=1.2
 VOLUME ["/data"]
 EXPOSE 8080
 USER hoerbert
