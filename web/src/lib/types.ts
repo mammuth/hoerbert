@@ -56,7 +56,25 @@ export interface TsStatus {
   channel?: string
   listeners: number
   users: string[]
+  /** Every channel in display order; empty when the server view is off. */
+  channels: TsChannel[]
   error?: string
+}
+
+export interface TsChannel {
+  id: number
+  name: string
+  depth: number
+  clients: TsClient[]
+}
+
+export interface TsClient {
+  name: string
+  muted: boolean
+  deaf: boolean
+  away: boolean
+  /** The bot itself. */
+  me: boolean
 }
 
 export interface Snapshot {

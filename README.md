@@ -15,6 +15,7 @@ Control it from a shared web UI or with `!commands` in the chat.
 - **No ads, no sponsor reads:** yt-dlp fetches the raw audio, and
   [SponsorBlock](https://sponsor.ajay.app/) segments on YouTube are skipped.
 - **Soundboard:** your own clips as buttons and `!<name>` commands, mixed over the music.
+- **Server view:** see who's online in every channel, live, with mute and away status.
 - **Text to speech:** `!tts hello` makes the bot talk, with silly voices; the music ducks while it does.
 - **Greetings:** says hi when someone joins the channel, with lines you can add to.
 - **Good sound:** 48 kHz stereo Opus at 128 kbit/s.
@@ -83,6 +84,16 @@ command and a button in the web UI.
 
 </details>
 
+### Server view
+
+The web UI lists every channel on the server and who is in it, the way the
+TeamSpeak client does: nested channels, spacers, muted mics and speakers,
+and away users. The bot's own channel is highlighted. It updates live as
+people join, leave and move around. "Hide empty" hides channels nobody is in.
+
+Anyone with the web key can see who is online server-wide.
+`SERVER_VIEW=false` turns it off.
+
 ### Text to speech
 
 `!tts` and the *Say* box in the web UI read text out loud with
@@ -145,6 +156,7 @@ Only `TS_ADDRESS` is required.
 | `WEB_BIND` | `0.0.0.0:8080` | where the web UI listens |
 | `PUBLIC_URL` | — | URL shown by `!link` / `!help` (includes the key) |
 | `WEB_KEY` | generated | web UI key; if unset, a 5-letter key is generated and saved in `DATA_DIR/web_key` |
+| `SERVER_VIEW` | `true` | list all channels and who is in them; shows everyone online to anyone with the key |
 | **Audio** | | |
 | `DEFAULT_VOLUME` | `0.1` | playback volume, 0.0 – 1.5 (fixed, no UI control) |
 | `OPUS_BITRATE` | `128000` | Opus encoder bitrate |

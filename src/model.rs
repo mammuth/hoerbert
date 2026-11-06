@@ -103,7 +103,7 @@ pub struct Segment {
 	pub category: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct TsStatus {
 	pub connected: bool,
 	pub server: String,
@@ -112,8 +112,31 @@ pub struct TsStatus {
 	pub listeners: u32,
 	/// Names of the other clients in the bot's channel.
 	pub users: Vec<String>,
+	/// The whole server, in TeamSpeak's display order.
+	pub channels: Vec<TsChannel>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct TsChannel {
+	pub id: u64,
+	pub name: String,
+	/// Nesting level, 0 for top level channels.
+	pub depth: u32,
+	pub clients: Vec<TsClient>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct TsClient {
+	pub name: String,
+	/// Microphone muted or disabled.
+	pub muted: bool,
+	/// Speakers muted or disabled.
+	pub deaf: bool,
+	pub away: bool,
+	/// The bot itself.
+	pub me: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]

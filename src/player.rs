@@ -182,7 +182,7 @@ pub fn spawn(
 	// Some loss on the uplink is expected; trade a little bitrate for robustness.
 	encoder.set_inband_fec(true)?;
 	encoder.set_packet_loss_perc(5)?;
-	let ts_status = TsStatus { connected: false, server: cfg.ts_address.clone(), channel: None, listeners: 0, users: Vec::new(), error: None };
+	let ts_status = TsStatus { connected: false, server: cfg.ts_address.clone(), channel: None, listeners: 0, users: Vec::new(), channels: Vec::new(), error: None };
 	let (cmd_tx, cmd_rx) = mpsc::channel(64);
 	let (load_tx, load_rx) = mpsc::channel(8);
 	let mut player = Player {
@@ -229,7 +229,7 @@ pub fn spawn(
 fn empty_snapshot() -> StateSnapshot {
 	StateSnapshot {
 		version: 0,
-		ts: TsStatus { connected: false, server: String::new(), channel: None, listeners: 0, users: Vec::new(), error: None },
+		ts: TsStatus { connected: false, server: String::new(), channel: None, listeners: 0, users: Vec::new(), channels: Vec::new(), error: None },
 		playback: Playback {
 			status: PlaybackStatus::Idle,
 			item: None,

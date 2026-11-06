@@ -16,6 +16,8 @@ pub struct Config {
 	pub public_url: Option<String>,
 	/// Shared secret for the web UI, handed out via the `!help` link.
 	pub web_key: String,
+	/// Show every channel and who is in it in the web UI.
+	pub server_view: bool,
 	pub data_dir: PathBuf,
 	pub ytdlp_bin: String,
 	pub ffmpeg_bin: String,
@@ -82,6 +84,7 @@ impl Config {
 			web_bind: env("WEB_BIND").unwrap_or_else(|| "0.0.0.0:8080".into()),
 			public_url: env("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string()),
 			web_key,
+			server_view: env("SERVER_VIEW").map(|v| v != "false" && v != "0").unwrap_or(true),
 			soundboard_file: env("SOUNDBOARD_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("sounds.json")),
 			soundboard_volume: env("SOUNDBOARD_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(5.0),
 			history_hours: env("HISTORY_HOURS").and_then(|v| v.parse().ok()).unwrap_or(168),

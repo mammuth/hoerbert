@@ -2,7 +2,7 @@
 //! on its own thread with a current-thread runtime and talks to the rest of
 //! the app over channels.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -16,7 +16,7 @@ use tsclientlib::{ChannelId, ClientId, Connection, Identity, Invoker, MessageTar
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 use crate::config::Config;
-use crate::model::TsStatus;
+use crate::model::{TsChannel, TsClient, TsStatus};
 
 pub enum AudioOut {
 	/// One 20 ms Opus frame.
@@ -119,6 +119,7 @@ async fn run(cfg: Config, mut chans: TsChannels) {
 						channel: None,
 						listeners: 0,
 						users: Vec::new(),
+						channels: Vec::new(),
 						error: Some(format!("{e:#}")),
 					}))
 					.await;
@@ -168,7 +169,7 @@ impl Members {
 }
 
 fn status_from_book(cfg: &Config, con: &Connection, connected: bool) -> TsStatus {
-	let mut status = TsStatus { connected, server: cfg.ts_address.clone(), channel: None, listeners: 0, users: Vec::new(), error: None };
+	let mut status = TsStatus { connected, server: cfg.ts_address.clone(), channel: None, listeners: 0, users: Vec::new(), channels: Vec::new(), error: None };
 	if let Ok(book) = con.get_state() {
 		if let Some(me) = book.clients.get(&book.own_client) {
 			status.channel = book.channels.get(&me.channel).map(|c| c.name.clone());
@@ -185,11 +186,46 @@ fn status_from_book(cfg: &Config, con: &Connection, connected: bool) -> TsStatus
 				.collect();
 			status.users.sort_by_key(|n| n.to_lowercase());
 		}
+		if cfg.server_view {
+			status.channels = channel_tree(book);
+		}
 		if !status.server.contains(&book.server.name) {
 			status.server = format!("{} ({})", book.server.name, cfg.ts_address);
 		}
 	}
 	status
+}
+
+/// All channels in the order the TeamSpeak client shows them. Siblings form a
+/// linked list: `order` is the id of the channel above (0 for the first one).
+fn channel_tree(book: &tsclientlib::data::Connection) -> Vec<TsChannel> {
+	let mut clients: HashMap<ChannelId, Vec<TsClient>> = HashMap::new();
+	for c in book.clients.values() {
+		clients.entry(c.channel).or_default().push(TsClient {
+			name: c.name.clone(),
+			muted: c.input_muted || !c.input_hardware_enabled,
+			deaf: c.output_muted || !c.output_hardware_enabled,
+			away: c.away_message.is_some(),
+			me: c.id == book.own_client,
+		});
+	}
+	let mut children: HashMap<ChannelId, HashMap<ChannelId, ChannelId>> = HashMap::new();
+	for ch in book.channels.values() {
+		children.entry(ch.parent).or_default().insert(ch.order, ch.id);
+	}
+	let mut out = Vec::with_capacity(book.channels.len());
+	// Depth-first; a stack of (parent, previous sibling, depth).
+	let mut stack = vec![(ChannelId(0), ChannelId(0), 0u32)];
+	while let Some((parent, prev, depth)) = stack.pop() {
+		let Some(&id) = children.get(&parent).and_then(|s| s.get(&prev)) else { continue };
+		let Some(ch) = book.channels.get(&id) else { continue };
+		let mut members = clients.remove(&id).unwrap_or_default();
+		members.sort_by_key(|c| c.name.to_lowercase());
+		out.push(TsChannel { id: id.0, name: ch.name.clone(), depth, clients: members });
+		stack.push((parent, id, depth));
+		stack.push((id, ChannelId(0), depth + 1));
+	}
+	out
 }
 
 async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
@@ -236,8 +272,13 @@ async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
 	}
 	info!("connected to teamspeak");
 	let mut own_id = con.get_state().ok().map(|b| b.own_client);
-	let send_status = |con: &Connection, connected: bool| {
-		let _ = chans.event_tx.try_send(TsEvent::Status(status_from_book(cfg, con, connected)));
+	// Most book events (descriptions, talk power, …) change nothing we show.
+	let mut last_status: Option<TsStatus> = None;
+	let mut send_status = |con: &Connection, connected: bool| {
+		let status = status_from_book(cfg, con, connected);
+		if last_status.as_ref() != Some(&status) && chans.event_tx.try_send(TsEvent::Status(status.clone())).is_ok() {
+			last_status = Some(status);
+		}
 	};
 	send_status(&con, true);
 	let mut members = Members::new();
@@ -253,6 +294,12 @@ async fn session(cfg: &Config, chans: &mut TsChannels) -> Result<()> {
 			book.client_update().set_input_muted(false).set_output_muted(false),
 		));
 		let _ = cmd.send(&mut con);
+	}
+	// Without this the server only tells us about clients in our own channel.
+	if cfg.server_view {
+		if let Err(e) = tsclientlib::messages::c2s::OutChannelSubscribeAllMessage::new().send(&mut con) {
+			warn!(error = %e, "could not subscribe to all channels");
+		}
 	}
 
 	let mut packet_id: u16 = 0;

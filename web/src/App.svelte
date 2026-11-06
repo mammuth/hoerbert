@@ -6,6 +6,7 @@
   import KeyGate from './lib/KeyGate.svelte'
   import NowPlaying from './lib/NowPlaying.svelte'
   import Queue from './lib/Queue.svelte'
+  import ServerView from './lib/ServerView.svelte'
   import Soundboard from './lib/Soundboard.svelte'
   import { store } from './lib/store.svelte'
 
@@ -54,6 +55,7 @@
           <h3 class="side-title"><Icon name="history" size={16} /> History</h3>
           <History />
         </section>
+        <ServerView />
       </aside>
     </main>
 
@@ -88,8 +90,7 @@
 
   main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 18px; align-items: start; }
   .col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-  .side { position: sticky; top: 16px; max-height: calc(100vh - 32px); }
-  .history { padding: 14px; min-height: 0; overflow: auto; }
+  .history { padding: 14px; max-height: 320px; overflow: auto; }
   .side-title { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 700; font-size: 15px; padding: 6px 10px 16px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
   footer { font-size: 12px; text-align: center; margin-top: auto; }
 
@@ -99,7 +100,6 @@
 
   @media (max-width: 960px) {
     main { grid-template-columns: 1fr; }
-    .side { position: static; max-height: none; }
   }
   @media (max-width: 560px) {
     h1 { font-size: 24px; }
