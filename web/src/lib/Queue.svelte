@@ -11,6 +11,28 @@
   let dragId = $state<string | null>(null)
   let overIndex = $state<number | null>(null)
 
+  // desktop: let the list fill the viewport down to the fold; mobile uses the CSS cap
+  let list = $state<HTMLOListElement>()
+  let fitMax = $state<number | null>(null)
+  $effect(() => {
+    const el = list
+    if (!el) return
+    const desktop = matchMedia('(min-width: 961px)')
+    const fit = () => {
+      const top = el.getBoundingClientRect().top + scrollY
+      // card bottom sits above the fold by the same gap as between the cards
+      const card = el.closest('section')!
+      const below = parseFloat(getComputedStyle(card).paddingBottom) + parseFloat(getComputedStyle(card.parentElement!).rowGap)
+      fitMax = desktop.matches ? Math.max(280, innerHeight - top - below + 2) : null
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(document.body)
+    addEventListener('resize', fit)
+    desktop.addEventListener('change', fit)
+    return () => { ro.disconnect(); removeEventListener('resize', fit); desktop.removeEventListener('change', fit) }
+  })
+
   function onDragStart(e: DragEvent, item: QueueItem) {
     dragId = item.id
     e.dataTransfer?.setData('text/plain', item.id)
@@ -47,7 +69,7 @@
   {#if !queue.length}
     <div class="empty faint">Queue is empty. Add something above — or type <span class="mono">!play &lt;song&gt;</span> in TeamSpeak.</div>
   {:else}
-    <ol>
+    <ol bind:this={list} style:max-height={fitMax ? `${fitMax}px` : null}>
       {#each queue as item, i (item.id)}
         {#if i > 0 && !item.request && queue[i - 1].request}
           <li class="divider mono faint" aria-hidden="true">then from playlists &amp; mixes</li>
@@ -92,7 +114,8 @@
   .count { font-size: 12px; font-weight: 400; }
   .acts { display: flex; gap: 2px; }
   .empty { padding: 24px 8px; text-align: center; font-size: 14px; }
-  ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: min(55vh, 440px); overflow-y: auto; overscroll-behavior: contain; }
+  ol > li { flex-shrink: 0; }
   li { display: grid; grid-template-columns: 24px 56px 1fr auto auto; gap: 10px; align-items: center; padding: 6px 8px 6px 4px; border-radius: 10px; border: 1px solid transparent; }
   li:hover { background: var(--surface-2); }
   li.over { border-color: var(--accent); background: rgba(255, 122, 26, 0.06); }
