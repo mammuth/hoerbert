@@ -95,7 +95,11 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 					ctx.player.send_as(Cmd::Resume, who).await;
 					return Some("▶ resumed".into());
 				}
-				return Some(format!("usage: {prefix}play <url or search terms>"));
+				return Some(match cmd.as_str() {
+					"next" => format!("usage: {prefix}next <url or search terms> – play right after the current track"),
+					"playnow" => format!("usage: {prefix}playnow <url or search terms> – play immediately"),
+					_ => format!("usage: {prefix}play <url or search terms>"),
+				});
 			}
 			match ctx.resolver.resolve_input(arg).await {
 				Ok((name, tracks)) if !tracks.is_empty() => {
