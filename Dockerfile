@@ -14,7 +14,6 @@ COPY Cargo.toml Cargo.lock ./
 # Dependencies only (stub main): this layer stays cached until Cargo.* change.
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release --locked && rm -rf src
 COPY src ./src
-COPY examples ./examples
 COPY --from=web /web/dist ./web/dist
 # touch: the stub binary is newer than the checked-out sources
 RUN touch src/main.rs && cargo build --release --locked && strip target/release/hoerbert

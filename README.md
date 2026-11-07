@@ -252,10 +252,6 @@ cd web && npm install && npm run dev
 TTS needs the TTS server (`tts/piper_server.py`, see the Dockerfile for its voices);
 point `TTS_URL` at it, otherwise TTS is off.
 
-`cargo run --example listen -- <server> [channel] [seconds]` joins as a second
-client and counts the audio packets it receives. Handy to check the bot is
-audible without starting a TeamSpeak client.
-
 A local TeamSpeak server for testing:
 
 ```bash
