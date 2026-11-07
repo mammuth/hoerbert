@@ -13,6 +13,7 @@
   const progress = $derived(duration ? Math.min(100, (position / duration) * 100) : 0)
   const playing = $derived(pb?.status === 'playing')
 
+  let innerWidth = $state(0)
   let scrubbing = $state(false)
   let scrubPos = $state(0)
 
@@ -43,9 +44,11 @@
   const shownPos = $derived(scrubbing ? scrubPos : position)
 </script>
 
+<svelte:window bind:innerWidth />
+
 <section class="card now rise">
   <div class="art">
-    <Vinyl thumbnail={track?.thumbnail} spinning={playing} />
+    <Vinyl thumbnail={track?.thumbnail} spinning={playing} size={innerWidth <= 720 ? 96 : 168} />
   </div>
   <div class="info">
     <div class="eyebrow">
@@ -116,26 +119,26 @@
 </section>
 
 <style>
-  .now { display: grid; grid-template-columns: 220px 1fr; gap: 28px; padding: 28px; align-items: center; overflow: hidden; position: relative; }
+  .now { display: grid; grid-template-columns: 168px 1fr; gap: 24px; padding: 20px 24px; align-items: center; overflow: hidden; position: relative; }
   .now::after {
     content: ''; position: absolute; inset: auto -20% -60% auto; width: 60%; height: 120%; pointer-events: none;
     background: radial-gradient(closest-side, rgba(255, 122, 26, 0.12), transparent); filter: blur(10px);
   }
   .art { display: flex; justify-content: center; }
-  .info { min-width: 0; display: flex; flex-direction: column; gap: 6px; position: relative; }
-  .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .info { min-width: 0; display: flex; flex-direction: column; gap: 4px; position: relative; }
+  .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); display: inline-block; }
   .dot.live { background: var(--accent); box-shadow: 0 0 0 0 rgba(255, 122, 26, 0.6); animation: pulse 1.6s ease-out infinite; }
   .dot.loading { background: var(--accent-2); animation: blink 0.8s ease-in-out infinite alternate; }
   @keyframes pulse { to { box-shadow: 0 0 0 10px rgba(255, 122, 26, 0); } }
   @keyframes blink { to { opacity: 0.3; } }
-  .title { font-size: clamp(20px, 2.6vw, 30px); line-height: 1.15; font-weight: 800; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .title { font-size: clamp(18px, 2.2vw, 26px); line-height: 1.15; font-weight: 800; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .title a { color: inherit; text-decoration: none; }
   .title a:hover { color: var(--accent-2); }
   .artist { font-size: 15px; }
   .error { color: var(--danger); font-size: 13px; background: rgba(255, 92, 92, 0.08); border: 1px solid rgba(255, 92, 92, 0.25); padding: 6px 10px; border-radius: 8px; }
 
-  .bar-wrap { margin-top: 10px; }
+  .bar-wrap { margin-top: 4px; }
   .bar { position: relative; height: 22px; cursor: pointer; display: flex; align-items: center; touch-action: none; }
   .bar.disabled { cursor: default; }
   .bar::before { content: ''; position: absolute; left: 0; right: 0; height: 6px; border-radius: 6px; background: var(--border-strong); }
@@ -145,11 +148,11 @@
   .bar:hover .knob, .bar:focus-visible .knob { opacity: 1; }
   .times { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 2px; }
 
-  .controls { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .big { width: 52px; height: 52px; border-radius: 50%; box-shadow: 0 10px 30px -10px rgba(255, 122, 26, 0.8); }
+  .controls { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
+  .big { width: 46px; height: 46px; border-radius: 50%; box-shadow: 0 10px 30px -10px rgba(255, 122, 26, 0.8); }
 
   @media (max-width: 720px) {
-    .now { grid-template-columns: 1fr; padding: 22px; gap: 18px; }
-    .art { order: -1; }
+    .now { grid-template-columns: 96px 1fr; padding: 16px; gap: 14px; align-items: start; }
+    .eyebrow { font-size: 11px; letter-spacing: 0.1em; }
   }
 </style>
