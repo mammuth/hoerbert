@@ -169,13 +169,13 @@ Only `TS_ADDRESS` is required.
 | `WEB_KEY` | generated | web UI key; if unset, a 5-letter key is generated and saved in `DATA_DIR/web_key` |
 | `SERVER_VIEW` | `true` | list all channels and who is in them; shows everyone online to anyone with the key |
 | **Audio** | | |
-| `DEFAULT_VOLUME` | `0.1` | playback volume, 0.0 – 1.5 (fixed, no UI control) |
+| `MUSIC_VOLUME` | `0.06` | music volume, 0.0 – 1.5; speech and sounds keep their level |
 | `OPUS_BITRATE` | `128000` | Opus encoder bitrate |
 | `SPONSORBLOCK` | `true` | skip SponsorBlock segments on YouTube |
 | `SPONSORBLOCK_CATEGORIES` | `sponsor,selfpromo,interaction,music_offtopic` | which categories to skip |
 | **Soundboard** | | |
 | `SOUNDBOARD_FILE` | `$DATA_DIR/sounds.json` | soundboard config |
-| `SOUNDBOARD_VOLUME` | `5` | sound loudness relative to the music |
+| `SOUNDBOARD_VOLUME` | `0.5` | sound loudness, 0.0 – 1.5 |
 | **Text to speech** | | |
 | `TTS` | `true` | enable TTS |
 | `TTS_VOICE` | `en` | default voice language, `en` or `de` |
@@ -184,7 +184,7 @@ Only `TS_ADDRESS` is required.
 | `TTS_IDLE` | `30` | minutes without speech before the voices are unloaded (`0`: never) |
 | `TTS_MAX_CHARS` | `200` | longer messages are cut |
 | `TTS_COOLDOWN` | `1` | seconds between two messages per user |
-| `TTS_VOLUME` | `10` | speech loudness relative to the music |
+| `TTS_VOLUME` | `1.0` | speech loudness, 0.0 – 1.5 (above 1 it may distort; prefer `GREET_VOLUME`) |
 | `TTS_DUCK` | `0.15` | music gain while speaking (`1` = no ducking) |
 | `GREET` | `true` | greet people joining the channel (needs TTS) |
 | `GREETINGS_FILE` | `$DATA_DIR/greetings.json` | greetings |

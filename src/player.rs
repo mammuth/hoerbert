@@ -139,7 +139,7 @@ pub struct Player {
 	current: Option<Current>,
 	/// Soundboard clip currently playing.
 	sfx: Option<Decoder>,
-	/// Gain of `sfx` relative to the music.
+	/// Gain of `sfx`, independent of the music volume.
 	sfx_gain: f32,
 	/// Speech currently talking, and the messages waiting after it.
 	speech: Option<Decoder>,
@@ -190,7 +190,7 @@ pub fn spawn(
 	let (cmd_tx, cmd_rx) = mpsc::channel(64);
 	let (load_tx, load_rx) = mpsc::channel(8);
 	let mut player = Player {
-		volume: cfg.default_volume.clamp(0.0, 1.5),
+		volume: cfg.music_volume,
 		queue: persisted.queue,
 		history: persisted.history,
 		events: persisted.events,
@@ -931,15 +931,16 @@ impl Player {
 		}
 		if has_music || sfx.is_some() || speech.is_some() {
 			let tts_gain = self.cfg.tts_volume;
-			// Mix in f32 so a boosted clip only clips after the master volume.
+			// Mix in f32 and clip once, at the end.
 			let pcm: Frame = (0..FRAME_LEN)
 				.map(|i| {
 					// Ramp the duck gain across the frame so the fade doesn't click.
 					let duck = duck_from + (self.duck - duck_from) * (i as f32 / FRAME_LEN as f32);
-					let m = music.as_ref().map_or(0.0, |f| f[i] as f32 * duck);
+					// Only the music follows the volume lever; speech and sounds keep their level.
+					let m = music.as_ref().map_or(0.0, |f| f[i] as f32 * duck * self.volume);
 					let s = sfx.as_ref().map_or(0.0, |f| f[i] as f32 * self.sfx_gain);
 					let v = speech.as_ref().map_or(0.0, |f| f[i] as f32 * tts_gain);
-					((m + s + v) * self.volume).clamp(i16::MIN as f32, i16::MAX as f32) as i16
+					(m + s + v).clamp(i16::MIN as f32, i16::MAX as f32) as i16
 				})
 				.collect();
 			match self.encoder.encode(&pcm[..FRAME_LEN], &mut self.opus_buf) {

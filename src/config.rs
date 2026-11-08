@@ -25,10 +25,12 @@ pub struct Config {
 	pub sponsorblock: bool,
 	pub sponsorblock_categories: Vec<String>,
 	pub opus_bitrate: i32,
-	pub default_volume: f32,
+	/// The volume lever: music only, speech and sounds have their own levels.
+	pub music_volume: f32,
 	pub command_prefix: String,
 	pub help_suffix: Option<String>,
 	pub soundboard_file: PathBuf,
+	/// Sound loudness, independent of the music volume.
 	pub soundboard_volume: f32,
 	/// Drop history tracks and events older than this.
 	pub history_hours: u64,
@@ -40,7 +42,7 @@ pub struct Config {
 	pub tts_max_chars: usize,
 	/// Seconds a user has to wait between two messages.
 	pub tts_cooldown: u64,
-	/// Speech loudness relative to the music.
+	/// Speech loudness, independent of the music volume (1.0: full scale).
 	pub tts_volume: f32,
 	/// Music gain while someone is talking.
 	pub tts_duck: f32,
@@ -51,6 +53,18 @@ pub struct Config {
 	/// Music gain while a greeting plays.
 	pub greet_duck: f32,
 	pub greetings_file: PathBuf,
+}
+
+/// Speech and sound levels used to be relative to the music volume (`TTS_VOLUME=10`);
+/// such old values (> 1.5) are converted so an old `.env` doesn't suddenly blast.
+fn own_volume(name: &str, default: f32, music_volume: f32) -> f32 {
+	let Some(v) = env(name).and_then(|v| v.parse::<f32>().ok()) else { return default };
+	if v > 1.5 {
+		let converted = v * music_volume;
+		tracing::warn!("{name}={v} is relative to the music volume (old style), using {converted:.2}; set {name}={converted:.2} to silence this");
+		return converted.min(1.5);
+	}
+	v.max(0.0)
 }
 
 fn env(name: &str) -> Option<String> {
@@ -71,6 +85,7 @@ impl Config {
 			.map(|s| s.trim().to_string())
 			.filter(|s| !s.is_empty())
 			.collect();
+		let music_volume = env("MUSIC_VOLUME").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.06).clamp(0.0, 1.5);
 		let data_dir = env("DATA_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data"));
 		let web_key = match env("WEB_KEY") {
 			Some(k) => k,
@@ -90,14 +105,14 @@ impl Config {
 			web_key,
 			server_view: env("SERVER_VIEW").map(|v| v != "false" && v != "0").unwrap_or(true),
 			soundboard_file: env("SOUNDBOARD_FILE").map(PathBuf::from).unwrap_or_else(|| data_dir.join("sounds.json")),
-			soundboard_volume: env("SOUNDBOARD_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(5.0),
+			soundboard_volume: own_volume("SOUNDBOARD_VOLUME", 0.5, music_volume),
 			history_hours: env("HISTORY_HOURS").and_then(|v| v.parse().ok()).unwrap_or(168),
 			tts: env("TTS").map(|v| v != "false" && v != "0").unwrap_or(true),
 			tts_url: env("TTS_URL").map(|u| u.trim_end_matches('/').to_string()),
 			tts_voice: env("TTS_VOICE").unwrap_or_else(|| "en".into()),
 			tts_max_chars: env("TTS_MAX_CHARS").and_then(|v| v.parse().ok()).unwrap_or(200),
 			tts_cooldown: env("TTS_COOLDOWN").and_then(|v| v.parse().ok()).unwrap_or(1),
-			tts_volume: env("TTS_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(10.0),
+			tts_volume: own_volume("TTS_VOLUME", 1.0, music_volume),
 			tts_duck: env("TTS_DUCK").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.15).clamp(0.0, 1.0),
 			greet: env("GREET").map(|v| v != "false" && v != "0").unwrap_or(true),
 			greet_volume: env("GREET_VOLUME").and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.5).clamp(0.0, 4.0),
@@ -110,7 +125,7 @@ impl Config {
 			sponsorblock: env("SPONSORBLOCK").map(|v| v != "false" && v != "0").unwrap_or(true),
 			sponsorblock_categories,
 			opus_bitrate: env("OPUS_BITRATE").and_then(|v| v.parse().ok()).unwrap_or(128_000),
-			default_volume: env("DEFAULT_VOLUME").and_then(|v| v.parse().ok()).unwrap_or(0.1),
+			music_volume,
 			command_prefix: env("COMMAND_PREFIX").unwrap_or_else(|| "!".into()),
 			help_suffix: env("HELP_SUFFIX").map(|s| s.replace("\\n", "\n")),
 		})
