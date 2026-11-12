@@ -23,6 +23,7 @@ export interface Sound {
   slug: string
   name: string
   emoji?: string
+  group?: string
 }
 
 export type PlayerEvent = { id: string; at: number; by?: string } & (

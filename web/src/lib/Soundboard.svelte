@@ -12,6 +12,17 @@
   let voice = $state<string | undefined>(undefined)
   let saying = $state(false)
 
+  /** Ungrouped sounds first, then groups in order of first appearance. */
+  const groups = $derived.by(() => {
+    const by = new Map<string, Sound[]>([['', []]])
+    for (const s of sounds) {
+      const g = s.group?.trim() ?? ''
+      if (!by.has(g)) by.set(g, [])
+      by.get(g)!.push(s)
+    }
+    return [...by].filter(([, list]) => list.length)
+  })
+
   /** Voice languages besides the default one; none picked: the default voice. */
   const voices = [
     { id: 'de', label: 'Deutsch', emoji: '🇩🇪' },
@@ -62,9 +73,10 @@
         </div>
       </form>
     {/if}
-    {#if sounds.length}
+    {#each groups as [group, list] (group)}
+      {#if group}<h4 class="group">{group}</h4>{/if}
       <div class="pads">
-        {#each sounds as s (s.slug)}
+        {#each list as s (s.slug)}
           <button
             class="pad"
             class:hit={hit === s.slug}
@@ -77,7 +89,7 @@
           </button>
         {/each}
       </div>
-    {/if}
+    {/each}
   </section>
 {/if}
 
@@ -85,6 +97,8 @@
   .side-title { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 700; font-size: 15px; padding: 6px 10px 16px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
   .sb { padding: 14px; flex-shrink: 0; }
   .pads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .pads + .pads, .pads + .group { margin-top: 14px; }
+  .group { margin: 0; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding: 0 2px 6px; }
   .pad {
     flex-direction: column; justify-content: center; gap: 6px; padding: 12px 6px 10px; min-width: 0;
     border-radius: var(--radius-sm);

@@ -68,8 +68,8 @@ command and a button in the web UI.
 
 ```json
 [
-  { "slug": "airhorn", "name": "Airhorn", "emoji": "📯", "url": "sounds/airhorn.mp3", "volume": 0.8 },
-  { "slug": "rimshot", "name": "Rimshot", "emoji": "🥁", "url": "https://example.com/rimshot.ogg" }
+  { "slug": "airhorn", "name": "Airhorn", "emoji": "📯", "group": "Classics", "url": "sounds/airhorn.mp3", "volume": 0.8 },
+  { "slug": "rimshot", "name": "Rimshot", "emoji": "🥁", "group": "Classics", "url": "https://example.com/rimshot.ogg" }
 ]
 ```
 
@@ -78,6 +78,8 @@ command and a button in the web UI.
 
 - `url` is anything ffmpeg can read; relative paths resolve against the file's directory.
 - `volume` (default `1.0`) evens out loud and quiet clips.
+- `group` (optional) puts buttons under a small heading in the web UI, in
+  order of first appearance; ungrouped sounds come first.
 - Slugs are `[a-z0-9_-]`; built-in commands win over a sound with the same slug.
 - The file is re-read on use, so edits apply without a restart.
 
