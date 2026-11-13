@@ -11,6 +11,14 @@
   let text = $state('')
   let voice = $state<string | undefined>(undefined)
   let saying = $state(false)
+  /** Play sounds in this browser instead of TeamSpeak. */
+  let local = $state(false)
+  try { local = localStorage.getItem('hoerbert.sbLocal') === '1' } catch {}
+
+  function toggleLocal() {
+    local = !local
+    try { localStorage.setItem('hoerbert.sbLocal', local ? '1' : '0') } catch {}
+  }
 
   /** Ungrouped sounds first, then groups in order of first appearance. */
   const groups = $derived.by(() => {
@@ -39,7 +47,10 @@
   async function play(s: Sound) {
     hit = null
     requestAnimationFrame(() => { hit = s.slug })
-    await store.run(api.playSound(s.slug))
+    if (!local) return void await store.run(api.playSound(s.slug))
+    const audio = new Audio(api.soundUrl(s.slug))
+    audio.volume = Math.min(1, Math.max(0, s.volume ?? 1))
+    await store.run(audio.play().catch(() => { throw new Error(`Cannot play ${s.name} here`) }))
   }
 
   async function say(e: SubmitEvent) {
@@ -57,7 +68,12 @@
 
 {#if sounds.length || tts}
   <section class="card sb rise" style="animation-delay: 180ms">
-    <h3 class="side-title"><Icon name="volume" size={16} /> Soundboard</h3>
+    <h3 class="side-title">
+      <Icon name="volume" size={16} /> Soundboard
+      <button class="ghost chip local" class:on={local} onclick={toggleLocal} aria-pressed={local} title={local ? 'Sounds play in this browser only' : 'Sounds play in TeamSpeak'}>
+        🎧 local
+      </button>
+    </h3>
     {#if tts}
       <form class="say" onsubmit={say}>
         <div class="row">
@@ -116,6 +132,8 @@
   .row input { min-width: 0; }
   .voices { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
   .chip { flex-shrink: 0; padding: 5px 9px; font-size: 12px; border-radius: 999px; background: transparent; color: var(--muted); }
+  .local { margin-left: auto; font-family: var(--font-body); font-weight: 500; padding: 4px 9px; }
+  .local.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
   .chip.active { color: var(--accent); background: rgba(255, 122, 26, 0.1); }
   @keyframes thump {
     0% { transform: scale(0.9); border-color: var(--accent); box-shadow: 0 0 0 0 rgba(255, 122, 26, 0.55); }

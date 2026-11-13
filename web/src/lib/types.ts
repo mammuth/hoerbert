@@ -24,6 +24,8 @@ export interface Sound {
   name: string
   emoji?: string
   group?: string
+  /** Per-clip loudness, 1 = as recorded. */
+  volume?: number
 }
 
 export type PlayerEvent = { id: string; at: number; by?: string } & (

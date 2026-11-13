@@ -149,6 +149,7 @@ pub fn router(state: AppState) -> Router {
 		.route("/queue/{id}/play", post(queue_play))
 		.route("/sounds", get(sounds))
 		.route("/sounds/{slug}/play", post(sound_play))
+		.route("/sounds/{slug}/audio", get(sound_audio))
 		.route("/tts", post(tts))
 		.route("/greet", post(greet))
 		.route_layer(middleware::from_fn_with_state(state.clone(), require_key))
@@ -362,6 +363,20 @@ async fn sound_play(State(s): State<AppState>, Path(slug): Path<String>, body: O
 	let sound = s.soundboard.get(&slug.to_ascii_lowercase()).ok_or_else(not_found)?;
 	s.player.send_as(Cmd::PlaySound(sound), actor(body)).await;
 	ok()
+}
+/// The clip itself, for playing it in the browser instead of TeamSpeak.
+async fn sound_audio(State(s): State<AppState>, Path(slug): Path<String>) -> ApiResult {
+	let sound = s.soundboard.get(&slug.to_ascii_lowercase()).ok_or_else(not_found)?;
+	if sound.url.starts_with("http://") || sound.url.starts_with("https://") {
+		return Ok(Redirect::temporary(&sound.url).into_response());
+	}
+	// Anything else with a scheme is an ffmpeg protocol a browser can't fetch.
+	if sound.url.contains("://") {
+		return Err(not_found());
+	}
+	let data = tokio::fs::read(&sound.url).await.map_err(|_| not_found())?;
+	let mime = mime_guess::from_path(&sound.url).first_or_octet_stream();
+	Ok(([(header::CONTENT_TYPE, mime.as_ref()), (header::CACHE_CONTROL, "no-cache")], data).into_response())
 }
 
 #[derive(Deserialize)]

@@ -25,7 +25,8 @@ pub struct Sound {
 	/// Not exposed to the web UI (may be a local path).
 	#[serde(skip_serializing)]
 	pub url: String,
-	#[serde(default = "default_volume", skip_serializing)]
+	/// Exposed so the web UI can apply it when playing in the browser.
+	#[serde(default = "default_volume")]
 	pub volume: f32,
 }
 
