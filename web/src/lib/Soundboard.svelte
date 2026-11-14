@@ -71,7 +71,7 @@
     <h3 class="side-title">
       <Icon name="volume" size={16} /> Soundboard
       <button class="ghost chip local" class:on={local} onclick={toggleLocal} aria-pressed={local} title={local ? 'Sounds play in this browser only' : 'Sounds play in TeamSpeak'}>
-        🎧 local
+        🎧 browser only
       </button>
     </h3>
     {#if tts}
