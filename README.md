@@ -142,6 +142,7 @@ add your own. `GREET=false` turns greetings off.
 
 - `{name}` is the nickname of whoever joined.
 - `lang` is the voice's language like `TTS_VOICE` (the default if left out).
+- At most one greeting every 10 s, so a crowd joining isn't greeted one by one.
 - Each person is greeted at most once a minute, and nobody already in the
   channel is greeted when the bot (re)connects.
 - The file is re-read on every join, so edits apply without a restart.

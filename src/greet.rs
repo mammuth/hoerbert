@@ -25,6 +25,8 @@ use crate::tts::{Speech, Tts};
 
 /// Someone hopping between channels is greeted once per this.
 const COOLDOWN: Duration = Duration::from_secs(60);
+/// At most one greeting per this, so a crowd joining isn't greeted one by one.
+const THROTTLE: Duration = Duration::from_secs(10);
 /// Give the newcomer's client a moment to start playing our audio.
 pub const DELAY: Duration = Duration::from_secs(1);
 
@@ -55,6 +57,8 @@ pub struct Greeter {
 	tts: Tts,
 	/// Last greeting per user, for the cooldown.
 	last: Arc<Mutex<HashMap<String, Instant>>>,
+	/// Last greeting of anyone, for the throttle.
+	last_any: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Greeter {
@@ -66,13 +70,18 @@ impl Greeter {
 				Err(e) => warn!(error = %e, path = %path.display(), "cannot write default greetings"),
 			}
 		}
-		Self { path, tts, last: Default::default() }
+		Self { path, tts, last: Default::default(), last_any: Default::default() }
 	}
 
-	/// A random greeting for `name`; `None` during the cooldown or without usable greetings.
+	/// A random greeting for `name`; `None` during the cooldown or throttle, or
+	/// without usable greetings.
 	pub fn greeting(&self, name: &str) -> Option<Speech> {
 		let greetings = self.load()?;
 		{
+			let mut last_any = self.last_any.lock().unwrap();
+			if last_any.is_some_and(|t| t.elapsed() < THROTTLE) {
+				return None;
+			}
 			let mut last = self.last.lock().unwrap();
 			last.retain(|_, t| t.elapsed() < COOLDOWN);
 			let key = name.trim().to_lowercase();
@@ -80,6 +89,7 @@ impl Greeter {
 				return None;
 			}
 			last.insert(key, Instant::now());
+			*last_any = Some(Instant::now());
 		}
 		self.pick(&greetings, name)
 	}
