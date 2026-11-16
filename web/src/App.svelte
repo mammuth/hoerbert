@@ -99,7 +99,10 @@
   .toast.error { background: var(--danger); color: #fff; }
 
   @media (max-width: 960px) {
-    main { grid-template-columns: 1fr; }
+    main { grid-template-columns: minmax(0, 1fr); }
+    /* flatten columns so the server view can be ordered first */
+    .col { display: contents; }
+    main :global(.server) { order: -1; }
   }
   @media (max-width: 560px) {
     h1 { font-size: 24px; }
