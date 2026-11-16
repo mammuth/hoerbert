@@ -15,7 +15,8 @@ use crate::config::Config;
 use crate::model::Track;
 
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(90);
-const MAX_PLAYLIST_ENTRIES: usize = 500;
+/// Cap for playlists/mixes; yt-dlp pages lazily, so this also bounds fetch time.
+const MAX_PLAYLIST_ENTRIES: usize = 100;
 
 /// Everything ffmpeg needs to play a track.
 #[derive(Clone, Debug)]
@@ -229,7 +230,7 @@ impl Resolver {
 				return Ok((None, vec![direct_track(input)]));
 			}
 			let mut cmd = self.base_cmd();
-			cmd.arg("-J").arg("--flat-playlist").arg(input);
+			cmd.arg("-J").arg("--flat-playlist").arg("--playlist-items").arg(format!("1:{MAX_PLAYLIST_ENTRIES}")).arg(input);
 			match self.run_json(cmd).await {
 				Ok(v) => Self::tracks_from_json(v),
 				// Only unknown sites may be raw media; real extractor errors
