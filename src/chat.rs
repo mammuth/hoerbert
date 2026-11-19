@@ -105,13 +105,22 @@ async fn handle(ctx: &ChatContext, invoker: &Invoker, raw: &str) -> Option<Strin
 				Ok((name, tracks)) if !tracks.is_empty() => {
 					let n = tracks.len();
 					let first = tracks[0].title.clone();
+					// Teach the "mix" keyword when a search landed on an hour-long mix video.
+					let tip = if n == 1
+						&& !crate::resolver::is_url(arg)
+						&& tracks[0].duration.is_some_and(|d| d > 1200.0)
+					{
+						format!("\ntip: say \"{prefix}play <genre> mix\" to queue single songs from a playlist")
+					} else {
+						String::new()
+					};
 					let play_now = cmd == "playnow";
 					let next = cmd == "next";
 					ctx.player.send(Cmd::Add { tracks, requested_by: who, next, play_now }).await;
 					Some(if n == 1 {
-						format!("➕ queued: {first}")
+						format!("➕ queued: {first}{tip}")
 					} else {
-						format!("➕ queued {n} tracks{}", name.map(|n| format!(" from \"{n}\"")).unwrap_or_default())
+						format!("➕ queued {n} songs{}", name.map(|n| format!(" from playlist \"{n}\"")).unwrap_or_default())
 					})
 				}
 				Ok(_) => Some("nothing found".into()),

@@ -31,6 +31,10 @@
     if (r) { results = r.results; open = true }
   }
 
+  function queuedMsg(added: Track[], playlist?: string | null) {
+    return added.length === 1 ? `Queued: ${added[0].title}` : `Queued ${added.length} songs${playlist ? ` from “${playlist}”` : ''}`
+  }
+
   async function submit(opts: { next?: boolean; play_now?: boolean } = {}) {
     const q = query.trim()
     if (!q) return
@@ -38,14 +42,14 @@
     const r = await store.runAs((who) => api.add({ input: q, requested_by: who, ...opts }))
     busy = false
     if (r) {
-      store.toast(r.added.length === 1 ? `Queued: ${r.added[0].title}` : `Queued ${r.added.length} tracks${r.playlist ? ` from “${r.playlist}”` : ''}`)
+      store.toast(queuedMsg(r.added, r.playlist))
       query = ''; results = []; open = false
     }
   }
 
   async function addTrack(t: Track, opts: { next?: boolean; play_now?: boolean } = {}) {
     const r = await store.runAs((who) => api.add({ track: t, requested_by: who, ...opts }))
-    if (r) { store.toast(`Queued: ${t.title}`); open = false }
+    if (r) { store.toast(queuedMsg(r.added, r.playlist)); open = false }
   }
 
   function onKey(e: KeyboardEvent) {
@@ -95,7 +99,7 @@
     </button>
   </div>
   <div class="hint faint">
-    {#if store.nick}Enter adds · Shift+Enter plays next · tracks are requested as <strong>{store.nick}</strong>
+    {#if store.nick}Enter adds · Shift+Enter plays next · end with “mix” for playlists · tracks are requested as <strong>{store.nick}</strong>
     {:else}<span class="need">Enter your name to add songs</span>{/if}
   </div>
 
@@ -106,10 +110,13 @@
           <img src={t.thumbnail} alt="" loading="lazy" />
           <div class="meta">
             <div class="t ellipsis" title={t.title}>{t.title}</div>
-            <div class="s muted ellipsis">{t.artist ?? ''} · {fmtTime(t.duration)} · {sourceLabel(t.source)}</div>
+            <div class="s muted ellipsis">
+              {#if t.is_playlist}<span class="badge">playlist</span> {t.artist ?? ''}
+              {:else}{t.artist ?? ''} · {fmtTime(t.duration)} · {sourceLabel(t.source)}{/if}
+            </div>
           </div>
           <div class="acts">
-            <button class="icon" title="queue" onclick={() => addTrack(t)}><Icon name="plus" /></button>
+            <button class="icon" title={t.is_playlist ? 'queue all songs' : 'queue'} onclick={() => addTrack(t)}><Icon name="plus" /></button>
             <button class="icon ghost" title="play next" onclick={() => addTrack(t, { next: true })}><Icon name="next" /></button>
           </div>
         </li>
@@ -140,6 +147,7 @@
   .t { font-weight: 500; }
   .s { font-size: 12px; }
   .acts { display: flex; gap: 2px; }
+  .badge { color: var(--accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
   .close { grid-template-columns: 1fr !important; justify-items: center; }
   @media (max-width: 560px) {
     .row { flex-wrap: wrap; }

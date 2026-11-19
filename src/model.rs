@@ -26,6 +26,9 @@ pub struct Track {
 	pub source_id: Option<String>,
 	#[serde(default)]
 	pub is_live: bool,
+	/// Playlist search hit; expanded into its tracks when added, never played.
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub is_playlist: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -152,6 +152,13 @@ impl YtEntry {
 			.clone()
 			.or_else(|| if is_yt { self.id.as_ref().map(|id| format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg")) } else { None })
 			.or_else(|| self.thumbnails.as_ref().and_then(|t| t.last()).map(|t| t.url.clone()));
+		let is_playlist = url.contains("youtube.com/playlist?list=");
+		// Playlist ids aren't video ids: the i.ytimg.com fallback would 404.
+		let thumbnail = if is_playlist {
+			self.thumbnails.as_ref().and_then(|t| t.last()).map(|t| t.url.clone()).or(self.thumbnail.clone())
+		} else {
+			thumbnail
+		};
 		let is_live = self.is_live.unwrap_or(false) || matches!(self.live_status.as_deref(), Some("is_live"));
 		Some(Track {
 			title: self.title.clone().unwrap_or_else(|| url.clone()),
@@ -161,6 +168,7 @@ impl YtEntry {
 			source,
 			source_id: self.id.clone(),
 			is_live,
+			is_playlist,
 			url,
 		})
 	}
@@ -225,36 +233,82 @@ impl Resolver {
 			bail!("empty input");
 		}
 		if is_url(input) {
-			if looks_like_direct_media(input) {
-				// Don't bother yt-dlp with plain files / radio streams.
-				return Ok((None, vec![direct_track(input)]));
+			return self.resolve_url(input).await;
+		}
+		if let Some(q) = playlist_query(input) {
+			let hits = self.search_playlists(&q, 3).await.unwrap_or_else(|e| {
+				warn!(error = %e, query = %q, "playlist search failed");
+				vec![]
+			});
+			if let Some(pl) = hits.into_iter().next() {
+				let (name, tracks) = self.resolve_url(&pl.url).await?;
+				return Ok((name.or(Some(pl.title)), tracks));
 			}
-			let mut cmd = self.base_cmd();
-			cmd.arg("-J").arg("--flat-playlist").arg("--playlist-items").arg(format!("1:{MAX_PLAYLIST_ENTRIES}")).arg(input);
-			match self.run_json(cmd).await {
-				Ok(v) => Self::tracks_from_json(v),
-				// Only unknown sites may be raw media; real extractor errors
-				// (bot check, private, geo-block) must reach the user.
-				Err(e) if e.to_string().contains("Unsupported URL") => {
-					warn!(error = %e, url = input, "yt-dlp failed, falling back to direct URL");
-					Ok((None, vec![direct_track(input)]))
-				}
-				Err(e) => Err(e),
-			}
-		} else {
-			let tracks = self.search(input, SEARCH_CANDIDATES).await?;
-			match pick_best(tracks) {
-				Some(t) => Ok((None, vec![t])),
-				None => bail!("no results for \"{input}\""),
-			}
+		}
+		let tracks = self.search_videos(input, SEARCH_CANDIDATES).await?;
+		match pick_best(tracks) {
+			Some(t) => Ok((None, vec![t])),
+			None => bail!("no results for \"{input}\""),
 		}
 	}
 
+	async fn resolve_url(&self, input: &str) -> Result<(Option<String>, Vec<Track>)> {
+		if looks_like_direct_media(input) {
+			// Don't bother yt-dlp with plain files / radio streams.
+			return Ok((None, vec![direct_track(input)]));
+		}
+		let mut cmd = self.base_cmd();
+		cmd.arg("-J").arg("--flat-playlist").arg("--playlist-items").arg(format!("1:{MAX_PLAYLIST_ENTRIES}")).arg(input);
+		match self.run_json(cmd).await {
+			Ok(v) => Self::tracks_from_json(v),
+			// Only unknown sites may be raw media; real extractor errors
+			// (bot check, private, geo-block) must reach the user.
+			Err(e) if e.to_string().contains("Unsupported URL") => {
+				warn!(error = %e, url = input, "yt-dlp failed, falling back to direct URL");
+				Ok((None, vec![direct_track(input)]))
+			}
+			Err(e) => Err(e),
+		}
+	}
+
+	/// Turn a playlist search hit into its tracks; other tracks pass through.
+	pub async fn expand(&self, track: Track) -> Result<(Option<String>, Vec<Track>)> {
+		if !track.is_playlist {
+			return Ok((None, vec![track]));
+		}
+		let (name, tracks) = self.resolve_url(&track.url).await?;
+		Ok((name.or(Some(track.title)), tracks))
+	}
+
+	/// Search for the web UI's result list: playlists for "… mix" / "… playlist"
+	/// queries (falling back to videos when there are none), videos otherwise.
 	pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<Track>> {
+		if let Some(q) = playlist_query(query) {
+			match self.search_playlists(&q, limit).await {
+				Ok(hits) if !hits.is_empty() => return Ok(hits),
+				Ok(_) => {}
+				Err(e) => warn!(error = %e, query = %q, "playlist search failed"),
+			}
+		}
+		self.search_videos(query, limit).await
+	}
+
+	async fn search_videos(&self, query: &str, limit: usize) -> Result<Vec<Track>> {
 		let mut cmd = self.base_cmd();
 		cmd.arg("-J").arg("--flat-playlist").arg(format!("ytsearch{}:{}", limit.clamp(1, 25), query.trim()));
 		let v = self.run_json(cmd).await?;
 		Ok(Self::tracks_from_json(v)?.1)
+	}
+
+	/// YouTube search with the "playlists" filter; yt-dlp has no `ytsearch`
+	/// equivalent for playlists, but its tab extractor handles the results page.
+	async fn search_playlists(&self, query: &str, limit: usize) -> Result<Vec<Track>> {
+		let mut url = url::Url::parse("https://www.youtube.com/results").expect("static url");
+		url.query_pairs_mut().append_pair("search_query", query.trim()).append_pair("sp", "EgIQAw==");
+		let mut cmd = self.base_cmd();
+		cmd.arg("-J").arg("--flat-playlist").arg("--playlist-items").arg(format!("1:{}", limit.clamp(1, 25))).arg(url.as_str());
+		let v = self.run_json(cmd).await?;
+		Ok(Self::tracks_from_json(v)?.1.into_iter().filter(|t| t.is_playlist).collect())
 	}
 
 	/// Resolve the actual audio stream for a track.
@@ -349,5 +403,48 @@ fn direct_track(url: &str) -> Track {
 		source: Some("direct".into()),
 		source_id: None,
 		is_live: false,
+		is_playlist: false,
+	}
+}
+
+/// "classic rock mix" / "playlist 80s" → search YouTube playlists instead of
+/// videos. Only a whole leading/trailing word counts ("remix" doesn't), and
+/// quoted input opts out. Returns the query to send (minus "playlist").
+pub fn playlist_query(input: &str) -> Option<String> {
+	let s = input.trim();
+	if s.starts_with('"') || s.contains("://") {
+		return None;
+	}
+	let words: Vec<&str> = s.split_whitespace().collect();
+	if words.len() < 2 {
+		return None;
+	}
+	let kw = |w: &str| {
+		let w = w.to_ascii_lowercase();
+		w == "mix" || w == "playlist"
+	};
+	if !kw(words[0]) && !kw(words[words.len() - 1]) {
+		return None;
+	}
+	let q: Vec<&str> = words.into_iter().filter(|w| !w.eq_ignore_ascii_case("playlist")).collect();
+	Some(if q.is_empty() { s.to_string() } else { q.join(" ") })
+}
+
+#[cfg(test)]
+mod tests {
+	use super::playlist_query;
+
+	#[test]
+	fn playlist_keyword_detection() {
+		assert_eq!(playlist_query("classic rock mix").as_deref(), Some("classic rock mix"));
+		assert_eq!(playlist_query("Mix 80s synthwave").as_deref(), Some("Mix 80s synthwave"));
+		assert_eq!(playlist_query("chill playlist").as_deref(), Some("chill"));
+		assert_eq!(playlist_query("PLAYLIST gaming").as_deref(), Some("gaming"));
+		assert_eq!(playlist_query("mix playlist").as_deref(), Some("mix"));
+		assert_eq!(playlist_query("daft punk remix"), None);
+		assert_eq!(playlist_query("the mix tape song"), None);
+		assert_eq!(playlist_query("mix"), None);
+		assert_eq!(playlist_query("\"little mix\""), None);
+		assert_eq!(playlist_query("https://youtube.com/watch?v=x mix"), None);
 	}
 }

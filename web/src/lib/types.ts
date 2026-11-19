@@ -7,6 +7,8 @@ export interface Track {
   source?: string
   source_id?: string
   is_live?: boolean
+  /** Playlist search hit; the server expands it into its songs on add. */
+  is_playlist?: boolean
 }
 
 export interface QueueItem {

@@ -287,9 +287,16 @@ async fn add(State(s): State<AppState>, Json(body): Json<AddBody>) -> ApiResult 
 	let requested_by = Some(requester(body.requested_by)?);
 	let mut name = None;
 	let tracks = if let Some(t) = body.track {
-		vec![t]
+		// A playlist search hit is a pointer, not something ffmpeg can play.
+		let (n, t) = s.resolver.expand(t).await?;
+		name = n;
+		t
 	} else if let Some(ts) = body.tracks {
-		ts
+		let mut out = Vec::with_capacity(ts.len());
+		for t in ts {
+			out.extend(s.resolver.expand(t).await?.1);
+		}
+		out
 	} else if let Some(input) = body.input.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
 		let (n, t) = s.resolver.resolve_input(input).await?;
 		name = n;
