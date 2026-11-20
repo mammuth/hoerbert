@@ -763,10 +763,14 @@ impl Player {
 			Err(e) => {
 				let title = c.item.track.title.clone();
 				self.report_error(format!("{title}: {e:#}"));
-				self.resolve_failures += 1;
+				let msg = format!("{e:#}");
+				// Errors specific to this one video say nothing about the
+				// resolver's health, so they must not trip the stop below.
+				if !is_track_unavailable(&msg) {
+					self.resolve_failures += 1;
+				}
 				// A bot check / login wall hits every track: skipping would just
 				// drain the queue. Stop and keep the track instead.
-				let msg = format!("{e:#}");
 				if (msg.contains("Sign in to confirm you") && msg.contains("bot")) || self.resolve_failures >= MAX_RESOLVE_FAILURES {
 					error!(error = %e, failures = self.resolve_failures, "resolving keeps failing, stopping playback");
 					self.resolve_failures = 0;
@@ -1048,5 +1052,44 @@ fn pull_overlay(slot: &mut Option<Decoder>, what: &str) -> (Option<Frame>, bool)
 			}
 			(None, true)
 		}
+	}
+}
+
+/// yt-dlp errors that only concern one video (region lock, removed, private,
+/// members-only, ...), as opposed to the resolver itself being broken.
+fn is_track_unavailable(msg: &str) -> bool {
+	const PATTERNS: &[&str] = &[
+		"not made this video available in your country",
+		"not available in your country",
+		"blocked it in your country",
+		"Video unavailable",
+		"This video is unavailable",
+		"This video is not available",
+		"Private video",
+		"has been removed",
+		"account associated with this video has been terminated",
+		"copyright",
+		"members-only",
+		"Join this channel",
+		"Sign in to confirm your age",
+		"age-restricted",
+		"Premieres in",
+		"live event will begin",
+	];
+	PATTERNS.iter().any(|p| msg.contains(p))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::is_track_unavailable;
+
+	#[test]
+	fn classifies_per_track_errors() {
+		assert!(is_track_unavailable(
+			"yt-dlp: [youtube] abc: The uploader has not made this video available in your country"
+		));
+		assert!(is_track_unavailable("yt-dlp: [youtube] abc: Video unavailable. This video is private"));
+		assert!(!is_track_unavailable("yt-dlp timed out"));
+		assert!(!is_track_unavailable("yt-dlp: [youtube] abc: Sign in to confirm you're not a bot"));
 	}
 }
